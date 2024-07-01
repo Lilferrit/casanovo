@@ -9,6 +9,7 @@ import tempfile
 import warnings
 from pathlib import Path
 from typing import Iterable, List, Optional, Union
+from datetime import datetime
 
 import lightning.pytorch as pl
 import lightning.pytorch.loggers
@@ -215,7 +216,7 @@ class ModelRunner:
         self.trainer.fit(
             self.model,
             self.loaders.train_dataloader(),
-            self.loaders.val_dataloader(),
+            self.loaders.val_dataloader()
         )
 
     def dump_psms(
@@ -612,7 +613,6 @@ class ModelRunner:
             tokenizer_cs = MskbPeptideTokenizer
         else:
             tokenizer_cs = PeptideTokenizer
-
         self.tokenizer = tokenizer_cs(
             residues=self.config.residues,
             replace_isoleucine_with_leucine=self.config.replace_isoleucine_with_leucine,

@@ -214,6 +214,102 @@ class DeNovoDataModule(pl.LightningDataModule):
 
         return dataset
 
+        self.n_workers = n_workers if n_workers is not None else os.cpu_count()
+        self.shuffle = shuffle if shuffle else None  # set to None if not wanted. Otherwise torch throws and error
+        self.buffer_size = buffer_size
+
+        self.valid_charge = np.arange(1, max_charge+1)
+        self.preprocessing_fn = [
+            preprocessing.set_mz_range(min_mz=min_mz, max_mz=max_mz),
+            preprocessing.remove_precursor_peak(remove_precursor_tol, "Da"),
+            preprocessing.filter_intensity(min_intensity, n_peaks),
+            preprocessing.scale_intensity("root", 1),
+            scale_to_unit_norm
+            ]
+        self.custom_field_test_mgf = [
+            CustomField("scans",
+                        lambda x: x["params"]["scans"] if 'scans' in x["params"] else x["params"]["title"],
+                        pa.string()),
+            CustomField("title",
+                        lambda x: x["params"]["title"],
+                        pa.string())
+        ]
+        self.custom_field_test_mzml = [
+            CustomField("scans", lambda x: x["id"], pa.string()),
+            CustomField("title", lambda x: x["id"], pa.string()),
+        ]
+        
+        self.custom_field_anno = [CustomField("seq", lambda x: x["params"]["seq"], pa.string())]
+
+    def make_dataset(self, paths, annotated, mode, shuffle):
+        """
+        Make spectrum datasets
+        Parameters
+        ----------
+        paths : Iterable[str]
+            Paths to input datasets
+        annotated: bool
+            True if peptide sequence annotations are available for the test
+            data.
+        mode: str {"train", "valid", "test"}
+            The mode indicating name of lance instance  
+        shuffle: bool
+            Indicates whether to shuffle training data based on buffer_size
+        """
+        custom_fields = self.custom_field_anno if annotated else []
+        
+        if mode=="test":
+            if all([Path(f).suffix in ('.mgf') for f in paths]):
+                custom_fields = custom_fields + self.custom_field_test_mgf
+            if all([Path(f).suffix in (".mzml",  ".mzxml", '.mzML') for f in paths]):
+                custom_fields = custom_fields + self.custom_field_test_mzml
+            
+        lance_path = f'{self.lance_dir}/{mode}.lance'
+        
+        parse_kwargs = dict(
+            preprocessing_fn=self.preprocessing_fn,
+            custom_fields=custom_fields,
+            valid_charge=self.valid_charge,
+
+        )
+
+        dataset_params = dict(
+            batch_size=self.train_batch_size if mode=="train" else self.eval_batch_size
+        )
+        anno_dataset_params = dataset_params | dict(
+            tokenizer=self.tokenizer,
+            annotations='seq',
+        )
+
+        if any([Path(f).suffix in (".lance") for f in paths]):
+            if annotated:
+                dataset = AnnotatedSpectrumDataset.from_lance(paths[0], **anno_dataset_params)
+            else:
+                dataset = SpectrumDataset.from_lance(paths[0], **dataset_params)
+        else:
+            if annotated:
+                dataset = AnnotatedSpectrumDataset(
+                    spectra=paths,
+                    path=lance_path,
+                    parse_kwargs=parse_kwargs,
+                    **anno_dataset_params,
+                )
+            else:
+                dataset = SpectrumDataset(
+                    spectra=paths,
+                    path=lance_path,
+                    parse_kwargs=parse_kwargs,
+                    **dataset_params,
+                )
+    
+        if shuffle:
+            dataset = ShufflerIterDataPipe(
+                dataset,
+                buffer_size=self.buffer_size
+            )
+
+        return dataset
+
     def setup(self, stage: str = None, annotated: bool = True) -> None:
         """
         Set up the PyTorch Datasets.
@@ -257,8 +353,7 @@ class DeNovoDataModule(pl.LightningDataModule):
         shuffle: bool = False,
     ) -> torch.utils.data.DataLoader:
         """
-        Create a PyTorch DataLoader.
-
+        Create a PyTorch DataLoader.  
         Parameters
         ----------
         dataset : torch.utils.data.Dataset
@@ -277,6 +372,9 @@ class DeNovoDataModule(pl.LightningDataModule):
             pin_memory=True,
             num_workers=self.n_workers,
             shuffle=shuffle,
+            num_workers=0,  # self.n_workers,
+            #precision=torch.float32,
+            pin_memory=True,
         )
 
     def train_dataloader(self) -> torch.utils.data.DataLoader:
