@@ -63,8 +63,15 @@ class ModelRunner:
 
         self.callbacks = []
         # Configure checkpoints.
+        self.callbacks = [
+            ModelCheckpoint(
+                dirpath=config.model_save_folder_path,
+                save_on_train_epoch_end=True,
+            )
+        ]
+
         if config.save_top_k is not None:
-            self.callbacks = [
+            self.callbacks.append(
                 ModelCheckpoint(
                     dirpath=config.model_save_folder_path,
                     monitor="valid_CELoss",
@@ -74,7 +81,8 @@ class ModelRunner:
                     filename="{epoch}-{step}-{train_CELoss:.3f}-{valid_CELoss:.3f}",
                     save_last=True,
                 )
-            ]
+            )
+            
         # Configure early stopping
         if config.early_stopping_patience is not None:
             self.callbacks.append(
@@ -230,7 +238,7 @@ class ModelRunner:
             additional_cfg = dict(
                 devices=devices,
                 callbacks=self.callbacks,
-                enable_checkpointing=self.config.save_top_k is not None,
+                enable_checkpointing=True,
                 max_epochs=self.config.max_epochs,
                 num_sanity_val_steps=self.config.num_sanity_val_steps,
                 strategy=self._get_strategy(),
