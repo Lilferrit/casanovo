@@ -331,7 +331,7 @@ class Spec2Pep(pl.LightningModule):
                 tokens, scores, finished_beams, batch, step + 1
             )
             tokens = tokens
-            
+
         # Return the peptide with the highest confidence score, within the
         # precursor m/z tolerance if possible.
         return list(self._get_top_peptide(pred_cache))
@@ -385,7 +385,7 @@ class Spec2Pep(pl.LightningModule):
                 if aa.startswith("[") and aa.endswith("]-")
             ]
         ).to(self.decoder.device)
-        
+
         beam_fits_precursor = torch.zeros(
             tokens.shape[0], dtype=torch.bool
         ).to(self.encoder.device)
@@ -905,7 +905,6 @@ class Spec2Pep(pl.LightningModule):
             "aa_precision", aa_precision, **log_args, batch_size=batch_size
         )
         return loss
-
 
     def predict_step(
         self, batch: Tuple[torch.Tensor, torch.Tensor, torch.Tensor], *args
@@ -1500,6 +1499,7 @@ def _aa_pep_score(
     if not fits_precursor_mz:
         peptide_score -= 1
     return aa_scores, peptide_score
+
 
 def generate_tgt_mask(sz: int) -> torch.Tensor:
     """Generate a square mask for the sequence.

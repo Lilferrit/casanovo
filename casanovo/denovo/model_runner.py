@@ -216,7 +216,7 @@ class ModelRunner:
         self.trainer.fit(
             self.model,
             self.loaders.train_dataloader(),
-            self.loaders.val_dataloader()
+            self.loaders.val_dataloader(),
         )
 
     def dump_psms(
