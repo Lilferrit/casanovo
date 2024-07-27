@@ -180,7 +180,7 @@ class MztabWriter:
             for i, psm in enumerate(
                 natsort.natsorted(self.psms, key=operator.itemgetter(1)), 1
             ):
-                #filename, idx = os.path.abspath(psm[1][0]), psm[1][1]
+                # filename, idx = os.path.abspath(psm[1][0]), psm[1][1]
                 writer.writerow(
                     [
                         "PSM",
@@ -201,7 +201,7 @@ class MztabWriter:
                         psm[3],  # charge
                         psm[4],  # exp_mass_to_charge
                         psm[5],  # calc_mass_to_charge
-                        f"ms_run[{self._run_map[psm[7][0]]}]:{psm[9][0]}", # Title and file name idx
+                        f"ms_run[{self._run_map[psm[7][0]]}]:{psm[9][0]}",  # Title and file name idx
                         "null",  # pre
                         "null",  # post
                         "null",  # start
