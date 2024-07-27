@@ -82,7 +82,7 @@ class ModelRunner:
                     save_last=True,
                 )
             )
-            
+
         # Configure early stopping
         if config.early_stopping_patience is not None:
             self.callbacks.append(
