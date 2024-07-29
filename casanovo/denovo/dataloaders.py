@@ -250,8 +250,8 @@ class DeNovoDataModule(pl.LightningDataModule):
         ]
 
     def make_dataset(self, paths, annotated, mode, shuffle):
-        """
-        Make spectrum datasets
+        """Make spectrum datasets.
+        
         Parameters
         ----------
         paths : Iterable[str]
