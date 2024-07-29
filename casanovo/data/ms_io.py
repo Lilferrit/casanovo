@@ -180,7 +180,6 @@ class MztabWriter:
             for i, psm in enumerate(
                 natsort.natsorted(self.psms, key=operator.itemgetter(1)), 1
             ):
-                # filename, idx = os.path.abspath(psm[1][0]), psm[1][1]
                 writer.writerow(
                     [
                         "PSM",
