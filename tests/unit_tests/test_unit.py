@@ -14,10 +14,8 @@ import torch
 from casanovo import casanovo
 from casanovo import utils
 from casanovo.data import ms_io
-from casanovo.data.datasets import SpectrumDataset, AnnotatedSpectrumDataset
 from casanovo.denovo.evaluate import aa_match_batch, aa_match_metrics
 from casanovo.denovo.model import Spec2Pep, _aa_pep_score
-from depthcharge.data import SpectrumIndex, AnnotatedSpectrumIndex
 
 
 def test_version():
