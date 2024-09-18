@@ -1035,18 +1035,15 @@ class Spec2Pep(pl.LightningModule):
             )
 
             self.out_writer.psms.append(
-                (
-                    peptide,
-                    scan,
-                    peptide_score,
-                    charge,
-                    precursor_mz,
-                    calc_mass,
-                    ",".join(list(map("{:.5f}".format, aa_scores))),
-                    file_name,
-                    true_seq,
-                    title,
-                ),
+                ms_io.PepSpecMatch(
+                    sequence=peptide,
+                    spectrum_id=tuple(spectrum_i),
+                    peptide_score=peptide_score,
+                    charge=int(charge),
+                    calc_mz=precursor_mz,
+                    exp_mz=self.peptide_mass_calculator.mass(peptide, charge),
+                    aa_scores=aa_scores,
+                )
             )
 
     def on_train_start(self):

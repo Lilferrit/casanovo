@@ -29,7 +29,7 @@ def test_initialize_model(tmp_path, mgf_small):
     config.max_epochs = 1
     config.n_layers = 1
     ckpt = tmp_path / "existing.ckpt"
-    with ModelRunner(config=config) as runner:
+    with ModelRunner(config=config, output_dir=tmp_path) as runner:
         runner.train([mgf_small], [mgf_small])
         runner.trainer.save_checkpoint(ckpt)
 
@@ -56,8 +56,9 @@ def test_save_and_load_weights(tmp_path, mgf_small, tiny_config):
     config.max_epochs = 1
     config.n_layers = 1
     ckpt = tmp_path / "test.ckpt"
+    mztab = tmp_path / "test.mztab"
 
-    with ModelRunner(config=config) as runner:
+    with ModelRunner(config=config, output_dir=tmp_path) as runner:
         runner.train([mgf_small], [mgf_small])
         runner.trainer.save_checkpoint(ckpt)
 
@@ -83,7 +84,7 @@ def test_save_and_load_weights(tmp_path, mgf_small, tiny_config):
     with torch.device("meta"):
         with ModelRunner(other_config, model_filename=str(ckpt)) as runner:
             with pytest.raises(NotImplementedError) as err:
-                runner.evaluate([mgf_small])
+                runner.predict([mgf_small], mztab)
 
     assert "meta tensor; no data!" in str(err.value)
 
@@ -95,11 +96,11 @@ def test_save_and_load_weights(tmp_path, mgf_small, tiny_config):
     # Shouldn't work:
     with ModelRunner(other_config, model_filename=str(ckpt)) as runner:
         with pytest.raises(RuntimeError):
-            runner.evaluate([mgf_small])
+            runner.predict([mgf_small], mztab)
 
     # Should work:
     with ModelRunner(config=config, model_filename=str(ckpt)) as runner:
-        runner.evaluate([mgf_small])
+        runner.predict([mgf_small], mztab)
 
 
 def test_save_and_load_weights_deprecated(tmp_path, mgf_small, tiny_config):
@@ -109,7 +110,7 @@ def test_save_and_load_weights_deprecated(tmp_path, mgf_small, tiny_config):
     config.cosine_schedule_period_iters = 5
     ckpt = tmp_path / "test.ckpt"
 
-    with ModelRunner(config=config) as runner:
+    with ModelRunner(config=config, output_dir=tmp_path) as runner:
         runner.train([mgf_small], [mgf_small])
         runner.trainer.save_checkpoint(ckpt)
 
@@ -120,11 +121,18 @@ def test_save_and_load_weights_deprecated(tmp_path, mgf_small, tiny_config):
     torch.save(ckpt_data, str(ckpt))
 
     # Inference.
-    with ModelRunner(config=config, model_filename=str(ckpt)) as runner:
+    with ModelRunner(
+        config=config, model_filename=str(ckpt), overwrite_ckpt_check=False
+    ) as runner:
         runner.initialize_model(train=False)
         assert runner.model.cosine_schedule_period_iters == 5
     # Fine-tuning.
-    with ModelRunner(config=config, model_filename=str(ckpt)) as runner:
+    with ModelRunner(
+        config=config,
+        model_filename=str(ckpt),
+        output_dir=tmp_path,
+        overwrite_ckpt_check=False,
+    ) as runner:
         with pytest.warns(DeprecationWarning):
             runner.train([mgf_small], [mgf_small])
             assert "max_iters" not in runner.model.opt_kwargs
@@ -138,7 +146,7 @@ def test_calculate_precision(tmp_path, mgf_small, tiny_config):
     config.calculate_precision = False
     config.tb_summarywriter = str(tmp_path)
 
-    runner = ModelRunner(config=config)
+    runner = ModelRunner(config=config, output_dir=tmp_path)
     with runner:
         runner.train([mgf_small], [mgf_small])
 
@@ -146,7 +154,9 @@ def test_calculate_precision(tmp_path, mgf_small, tiny_config):
     assert "valid_pep_precision" not in runner.model.history.columns
 
     config.calculate_precision = True
-    runner = ModelRunner(config=config)
+    runner = ModelRunner(
+        config=config, output_dir=tmp_path, overwrite_ckpt_check=False
+    )
     with runner:
         runner.train([mgf_small], [mgf_small])
 
@@ -160,17 +170,115 @@ def test_save_final_model(tmp_path, mgf_small, tiny_config):
     config = Config(tiny_config)
     config.val_check_interval = 50
     model_file = tmp_path / "epoch=19-step=20.ckpt"
-    with ModelRunner(config) as runner:
+    with ModelRunner(config, output_dir=tmp_path) as runner:
         runner.train([mgf_small], [mgf_small])
+
+    assert model_file.exists()
+
+    # Test that training again raises file exists error
+    with pytest.raises(FileExistsError):
+        with ModelRunner(config, output_dir=tmp_path) as runner:
+            runner.train([mgf_small], [mgf_small])
 
     assert model_file.exists()
     Path.unlink(model_file)
 
     # Test checkpoint saving when val_check_interval is not a factor of training steps
     config.val_check_interval = 15
-    validation_file = tmp_path / "epoch=14-step=15.ckpt"
-    with ModelRunner(config) as runner:
+    validation_file = tmp_path / "foobar.best.ckpt"
+    model_file = tmp_path / "foobar.epoch=19-step=20.ckpt"
+    with ModelRunner(
+        config, output_dir=tmp_path, output_rootname="foobar"
+    ) as runner:
         runner.train([mgf_small], [mgf_small])
 
     assert model_file.exists()
     assert validation_file.exists()
+
+
+def test_evaluate(
+    tmp_path, mgf_small, mzml_small, mgf_small_unannotated, tiny_config
+):
+    """Test model evaluation during sequencing"""
+    # Train tiny model
+    config = Config(tiny_config)
+    config.max_epochs = 1
+    model_file = tmp_path / "epoch=0-step=1.ckpt"
+    with ModelRunner(config, output_dir=tmp_path) as runner:
+        runner.train([mgf_small], [mgf_small])
+
+    assert model_file.is_file()
+
+    # Test evaluation with annotated peak file
+    result_file = tmp_path / "result.mztab"
+    with ModelRunner(
+        config, model_filename=str(model_file), overwrite_ckpt_check=False
+    ) as runner:
+        runner.predict([mgf_small], result_file, evaluate=True)
+
+    assert result_file.is_file()
+    result_file.unlink()
+
+    exception_string = (
+        "Error creating annotated spectrum index. "
+        "This may be the result of having an unannotated MGF file "
+        "present in the validation peak file path list.\n"
+    )
+
+    with pytest.raises(FileNotFoundError):
+        with ModelRunner(
+            config, model_filename=str(model_file), overwrite_ckpt_check=False
+        ) as runner:
+            runner.predict([mzml_small], result_file, evaluate=True)
+
+    with pytest.raises(TypeError, match=exception_string):
+        with ModelRunner(
+            config, model_filename=str(model_file), overwrite_ckpt_check=False
+        ) as runner:
+            runner.predict([mgf_small_unannotated], result_file, evaluate=True)
+
+    with pytest.raises(TypeError, match=exception_string):
+        with ModelRunner(
+            config, model_filename=str(model_file), overwrite_ckpt_check=False
+        ) as runner:
+            runner.predict(
+                [mgf_small_unannotated, mzml_small], result_file, evaluate=True
+            )
+
+    # MzTab with just metadata is written in the case of FileNotFound
+    # or TypeError early exit
+    assert result_file.is_file()
+    result_file.unlink()
+
+    # Test mix of annotated an unannotated peak files
+    with pytest.warns(RuntimeWarning):
+        with ModelRunner(
+            config, model_filename=str(model_file), overwrite_ckpt_check=False
+        ) as runner:
+            runner.predict([mgf_small, mzml_small], result_file, evaluate=True)
+
+    assert result_file.is_file()
+    result_file.unlink()
+
+    with pytest.raises(TypeError, match=exception_string):
+        with ModelRunner(
+            config, model_filename=str(model_file), overwrite_ckpt_check=False
+        ) as runner:
+            runner.predict(
+                [mgf_small, mgf_small_unannotated], result_file, evaluate=True
+            )
+
+    assert result_file.is_file()
+    result_file.unlink()
+
+    with pytest.raises(TypeError, match=exception_string):
+        with ModelRunner(
+            config, model_filename=str(model_file), overwrite_ckpt_check=False
+        ) as runner:
+            runner.predict(
+                [mgf_small, mgf_small_unannotated, mzml_small],
+                result_file,
+                evaluate=True,
+            )
+
+    result_file.unlink()

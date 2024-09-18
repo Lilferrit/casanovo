@@ -1,20 +1,21 @@
 """Small utility functions"""
 
-import heapq
 import logging
 import os
+import pathlib
 import platform
 import re
 import socket
 import sys
-import time
 from datetime import datetime
-from typing import Tuple, Dict, List, Optional
+from typing import Tuple, Dict, List, Optional, Iterable
 
 import numpy as np
 import pandas as pd
 import psutil
 import torch
+
+from .data.ms_io import PepSpecMatch
 
 
 SCORE_BINS = [0.0, 0.5, 0.9, 0.95, 0.99]
@@ -195,7 +196,7 @@ def log_run_report(
 
 
 def log_sequencing_report(
-    predictions: Tuple[str, Tuple[str, str], float, float, float, float, str],
+    predictions: List[PepSpecMatch],
     start_time: Optional[int] = None,
     end_time: Optional[int] = None,
     score_bins: List[float] = SCORE_BINS,
@@ -203,6 +204,8 @@ def log_sequencing_report(
     """
     Log sequencing run report
 
+    Parameters
+    ----------
     next_prediction : Tuple[
         str, Tuple[str, str], float, float, float, float, str
     ]
@@ -219,8 +222,8 @@ def log_sequencing_report(
     run_report = get_report_dict(
         pd.DataFrame(
             {
-                "sequence": [psm[0] for psm in predictions],
-                "score": [psm[2] for psm in predictions],
+                "sequence": [psm.sequence for psm in predictions],
+                "score": [psm.peptide_score for psm in predictions],
             }
         ),
         score_bins=score_bins,
@@ -251,3 +254,32 @@ def log_sequencing_report(
         logger.info(
             "Median Peptide Length: %d", run_report["median_sequence_length"]
         )
+
+
+def check_dir_file_exists(
+    dir: pathlib.Path, file_patterns: Iterable[str] | str
+) -> None:
+    """
+    Check that no file names in dir match any of file_patterns
+
+    Parameters
+    ----------
+    dir : pathlib.Path
+        The directory to check for matching file names
+    file_patterns : Iterable[str] | str
+        UNIX style wildcard pattern(s) to test file names against
+
+    Raises
+    ------
+    FileExistsError
+        If matching file name is found in dir
+    """
+    if isinstance(file_patterns, str):
+        file_patterns = [file_patterns]
+
+    for pattern in file_patterns:
+        if next(dir.glob(pattern), None) is not None:
+            raise FileExistsError(
+                f"File matching wildcard pattern {pattern} already exist in"
+                f"{dir} and can not be overwritten."
+            )
