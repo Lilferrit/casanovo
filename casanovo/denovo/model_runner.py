@@ -114,24 +114,6 @@ class ModelRunner:
             ),
         ]
 
-        # Configure early stopping
-        if config.early_stopping_patience is not None:
-            self.callbacks.append(
-                EarlyStopping(
-                    monitor="valid_CELoss",
-                    min_delta=0.00,
-                    patience=self.config.early_stopping_patience,
-                    verbose=True,
-                    check_finite=True,
-                    mode="min",
-                )
-            )
-        # Configure learning rate monitor
-        if config.tb_summarywriter is not None:
-            self.callbacks.append(
-                LearningRateMonitor(logging_interval="step", log_momentum=True)
-            )
-
     def __enter__(self):
         """Enter the context manager"""
         self.tmp_dir = tempfile.TemporaryDirectory()
