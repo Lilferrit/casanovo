@@ -116,6 +116,7 @@ class Spec2Pep(pl.LightningModule):
         out_writer: Optional[ms_io.MztabWriter] = None,
         calculate_precision: bool = False,
         tokenizer: Optional[PeptideTokenizer] = None,
+        tb_summarywriter: Optional[SummaryWriter] = None,  # TODO
         **kwargs: Dict,
     ):
         super().__init__()
