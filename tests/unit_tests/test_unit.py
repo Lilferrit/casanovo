@@ -25,6 +25,7 @@ import torch
 from casanovo import casanovo
 from casanovo import utils
 from casanovo.data import ms_io
+from casanovo.denovo.dataloaders import DeNovoDataModule
 from casanovo.denovo.evaluate import aa_match_batch, aa_match_metrics
 from casanovo.denovo.model import Spec2Pep, _aa_pep_score
 
@@ -838,12 +839,18 @@ def test_spectrum_id_mgf(mgf_small, tmp_path):
     """Test that spectra from MGF files are specified by their index."""
     mgf_small2 = tmp_path / "mgf_small2.mgf"
     shutil.copy(mgf_small, mgf_small2)
+    data_module = DeNovoDataModule(
+        train_paths=[mgf_small, mgf_small2],
+        valid_paths=[mgf_small, mgf_small2],
+        test_paths=[mgf_small, mgf_small2],
+    )
+    data_module.setup()
 
-    for dataset_func in [
-        depthcharge.data.SpectrumDataset,
-        depthcharge.data.AnnotatedSpectrumDataset,
+    for dataset in [
+        data_module.train_dataset,
+        data_module.valid_dataset,
+        data_module.test_dataset,
     ]:
-        dataset = dataset_func([mgf_small, mgf_small2], 1)
         for i, (filename, scan_id) in enumerate(
             [
                 (mgf_small, "0"),
