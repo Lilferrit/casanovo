@@ -2,18 +2,17 @@
 
 import collections
 import csv
-import dataclasses
 import operator
 import os
 import re
 from pathlib import Path
-from typing import List, Tuple, Iterable
+from typing import List
 
 import natsort
 
 from .. import __version__
 from ..config import Config
-from .pep_spec_match import PepSpecMatch
+from .psm import PepSpecMatch
 
 
 class MztabWriter:

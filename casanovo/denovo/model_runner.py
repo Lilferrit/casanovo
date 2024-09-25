@@ -11,11 +11,13 @@ from typing import Iterable, List, Optional, Union
 from datetime import datetime
 
 import lightning.pytorch as pl
+import lightning.pytorch.loggers
+import numpy as np
 import torch
 import torch.utils.data
 
 from lightning.pytorch.strategies import DDPStrategy
-from lightning.pytorch.callbacks import ModelCheckpoint
+from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
 from lightning.pytorch.loggers import TensorBoardLogger
 
 from depthcharge.tokenizers import PeptideTokenizer
@@ -65,6 +67,8 @@ class ModelRunner:
         self.config = config
         self.model_filename = model_filename
         self.output_dir = output_dir
+        self.output_rootname = output_rootname
+        self.overwrite_ckpt_check = overwrite_ckpt_check
 
         # Initialized later:
         self.tmp_dir = None
@@ -107,6 +111,7 @@ class ModelRunner:
                 filename=best_filename,
                 enable_version_counter=False,
             ),
+            LearningRateMonitor(log_momentum=True, log_weight_decay=True),
         ]
 
     def __enter__(self):
@@ -169,24 +174,39 @@ class ModelRunner:
         test_index : AnnotatedSpectrumIndex
             Index containing the annotated spectra used to generate model
             predictions
+        """
+        seq_pred = []
+        seq_true = []
+        pred_idx = 0
 
-        model_output = [psm.sequence for psm in self.writer.psms]
-        spectrum_annotations = [
-            test_index[i][4] for i in range(test_index.n_spectra)
-        ]
-        aa_precision, _, pep_precision = aa_match_metrics(
+        with test_index as t_ind:
+            for true_idx in range(t_ind.n_spectra):
+                seq_true.append(t_ind[true_idx][4])
+                if pred_idx < len(self.writer.psms) and self.writer.psms[
+                    pred_idx
+                ].spectrum_id == t_ind.get_spectrum_id(true_idx):
+                    seq_pred.append(self.writer.psms[pred_idx].sequence)
+                    pred_idx += 1
+                else:
+                    seq_pred.append(None)
+
+        aa_precision, aa_recall, pep_precision = aa_match_metrics(
             *aa_match_batch(
-                spectrum_annotations,
-                model_output,
+                seq_true,
+                seq_pred,
                 depthcharge.masses.PeptideMass().masses,
             )
         )
 
+        if self.config["top_match"] > 1:
+            logger.warning(
+                "The behavior for calculating evaluation metrics is undefined when "
+                "the 'top_match' configuration option is set to a value greater than 1."
+            )
+
         logger.info("Peptide Precision: %.2f%%", 100 * pep_precision)
         logger.info("Amino Acid Precision: %.2f%%", 100 * aa_precision)
-        """
-        # TODO: Fix log_metrics, wait for eval bug fix to be merged in
-        return
+        logger.info("Amino Acid Recall: %.2f%%", 100 * aa_recall)
 
     def predict(
         self,
@@ -282,7 +302,34 @@ class ModelRunner:
                 accumulate_grad_batches=self.config.accumulate_grad_batches,
                 gradient_clip_val=self.config.gradient_clip_val,
                 gradient_clip_algorithm=self.config.gradient_clip_algorithm,
+                log_every_n_steps=self.config.log_every_n_steps,
             )
+
+            if self.config.log_metrics:
+                if not self.output_dir:
+                    logger.warning(
+                        "Output directory not set in model runner. "
+                        "No loss file will be created."
+                    )
+                else:
+                    csv_log_dir = "csv_logs"
+                    if self.overwrite_ckpt_check:
+                        utils.check_dir_file_exists(
+                            self.output_dir,
+                            csv_log_dir,
+                        )
+
+                    additional_cfg.update(
+                        {
+                            "logger": lightning.pytorch.loggers.CSVLogger(
+                                self.output_dir,
+                                version=csv_log_dir,
+                                name=None,
+                            ),
+                            "log_every_n_steps": self.config.log_every_n_steps,
+                        }
+                    )
+
             trainer_cfg.update(additional_cfg)
 
         self.trainer = pl.Trainer(**trainer_cfg)

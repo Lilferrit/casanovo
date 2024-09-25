@@ -16,7 +16,7 @@ from depthcharge.tokenizers import PeptideTokenizer
 
 from . import evaluate
 from .. import config
-from ..data import ms_io, pep_spec_match
+from ..data import ms_io, psm
 from ..denovo.transformers import SpectrumEncoder, PeptideDecoder
 
 logger = logging.getLogger("casanovo")
@@ -1019,7 +1019,7 @@ class Spec2Pep(pl.LightningModule):
             )
 
             self.out_writer.psms.append(
-                pep_spec_match.PepSpecMatch(
+                psm.PepSpecMatch(
                     sequence=peptide,
                     spectrum_id=(file_name, scan),
                     peptide_score=peptide_score,
