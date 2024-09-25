@@ -946,7 +946,7 @@ class Spec2Pep(pl.LightningModule):
             for peptide_score, aa_scores, peptide in spectrum_preds:
                 predictions.append(
                     (
-                        scan,
+                        scan[0],
                         precursor_charge,
                         precursor_mz,
                         peptide,
