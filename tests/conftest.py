@@ -130,13 +130,10 @@ def _create_mgf_entry(
         f"TITLE={title}",
         f"PEPMASS={precursor_mz}",
         f"CHARGE={charge}+",
+        f"SCANS=F1:{2470 + title}",
         f"{frags}",
         "END IONS",
     ]
-
-    if annotate:
-        mgf.insert(1, f"SEQ={peptide}")
-
     return "\n".join(mgf)
 
 
