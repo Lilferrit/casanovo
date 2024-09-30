@@ -19,6 +19,7 @@ import torch.utils.data
 from lightning.pytorch.strategies import DDPStrategy
 from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
 from lightning.pytorch.loggers import TensorBoardLogger
+from torch.utils.data import DataLoader
 
 from depthcharge.tokenizers import PeptideTokenizer
 from depthcharge.tokenizers.peptides import MskbPeptideTokenizer
@@ -160,9 +161,7 @@ class ModelRunner:
             self.loaders.val_dataloader(),
         )
 
-    def log_metrics(
-        self, test_dataloader: torch.utils.data.DataLoader
-    ) -> None:
+    def log_metrics(self, test_dataloader: DataLoader) -> None:
         """Log peptide precision and amino acid precision
 
         Calculate and log peptide precision and amino acid precision
@@ -178,12 +177,19 @@ class ModelRunner:
         seq_true = []
         pred_idx = 0
 
-        with test_index as t_ind:
-            for true_idx in range(t_ind.n_spectra):
-                seq_true.append(t_ind[true_idx][4])
-                if pred_idx < len(self.writer.psms) and self.writer.psms[
-                    pred_idx
-                ].spectrum_id == t_ind.get_spectrum_id(true_idx):
+        for batch in test_dataloader:
+            for peak_file, scan_id, curr_seq_true in zip(
+                batch["peak_file"],
+                batch["scan_id"],
+                self.model.tokenizer.detokenize(batch["seq"][0]),
+            ):
+                spectrum_id_true = (peak_file, scan_id)
+                seq_true.append(curr_seq_true)
+                if (
+                    pred_idx < len(self.writer.psms)
+                    and self.writer.psms[pred_idx].spectrum_id
+                    == spectrum_id_true
+                ):
                     seq_pred.append(self.writer.psms[pred_idx].sequence)
                     pred_idx += 1
                 else:
@@ -193,7 +199,7 @@ class ModelRunner:
             *aa_match_batch(
                 seq_true,
                 seq_pred,
-                depthcharge.masses.PeptideMass().masses,
+                self.model.tokenizer.residues,
             )
         )
 
@@ -249,11 +255,12 @@ class ModelRunner:
         test_paths = self._get_input_paths(peak_path, evaluate, "test")
         self.writer.set_ms_run(test_paths)
         self.initialize_data_module(test_paths=test_paths)
-        self.loaders.setup(stage="test", annotated=False)
-        self.trainer.predict(self.model, self.loaders.test_dataloader())
+        self.loaders.setup(stage="test", annotated=evaluate)
+        predict_dataloader = self.loaders.predict_dataloader()
+        self.trainer.predict(self.model, predict_dataloader)
 
         if evaluate:
-            self.log_metrics(self.loaders.test_dataloader())
+            self.log_metrics(predict_dataloader)
 
     def initialize_trainer(self, train: bool) -> None:
         """Initialize the lightning Trainer.
