@@ -11,6 +11,48 @@ from depthcharge.transformers import (
 )
 
 
+class FourierFloatEncoder(torch.nn.Module):
+    def __init__(
+        self,
+        d_model: int,
+        start_exp: int = 1,
+    ) -> None:
+        """Initialize the MassEncoder."""
+        super().__init__()
+
+        # Get dimensions for equations:
+        d_sin = math.ceil(d_model / 2)
+        d_cos = d_model - d_sin
+
+        self.wave_lengths = (
+            2
+            ** torch.arange(
+                start_exp, start_exp - max(d_sin, d_cos), -1
+            ).float()
+        )
+
+        self.sin_term = self.wave_lengths[:d_sin].clone()
+        self.cos_term = self.wave_lengths[:d_cos].clone()
+
+    def forward(self, X: torch.Tensor) -> torch.Tensor:
+        """Encode m/z values.
+
+        Parameters
+        ----------
+        X : torch.Tensor of shape (batch_size, n_float)
+            The masses to embed.
+
+        Returns
+        -------
+        torch.Tensor of shape (batch_size, n_float, d_model)
+            The encoded features for the floating point numbers.
+
+        """
+        sin_features = torch.sin(X[:, :, None] * self.sin_term)
+        cos_features = torch.cos(X[:, :, None] * self.cos_term)
+        return torch.cat([sin_features, cos_features], axis=-1)
+
+
 class PeptideDecoder(AnalyteTransformerDecoder):
     """A transformer decoder for peptide sequences
 

@@ -1724,6 +1724,27 @@ def test_beam_search_decode(tiny_config):
         assert np.allclose(peptide_scores, peptide_scores[0])
 
 
+def test_fourier_encoder():
+    d_model = 12
+    floats = torch.tensor([1.0, 0.0])
+    wave_lengths = 2 ** torch.arange(1, -5, -1).float()
+    n_float = len(floats)
+    batch_size = 6
+    x = floats.repeat(batch_size, 1)
+    fourier_encoder = FourierFloatEncoder(d_model)
+
+    with_wavelength = x.unsqueeze(-1).repeat(1, 1, 6) * wave_lengths.reshape(
+        1, 1, -1
+    )
+    exp_sin = torch.sin(with_wavelength)
+    exp_cos = torch.cos(with_wavelength)
+    exp = torch.cat([exp_sin, exp_cos], axis=-1)
+
+    fourier_embeddings = fourier_encoder(x)
+    assert fourier_embeddings.shape == (batch_size, n_float, d_model)
+    assert torch.allclose(fourier_embeddings, exp)
+
+
 def test_eval_metrics():
     """
     Test peptide and amino acid-level evaluation metrics.
