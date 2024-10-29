@@ -32,8 +32,8 @@ from casanovo.data import db_utils, ms_io
 from casanovo.denovo.dataloaders import DeNovoDataModule
 from casanovo.denovo.evaluate import aa_match, aa_match_batch, aa_match_metrics
 from casanovo.denovo.transformers import (
-    FourierFloatEncoder,
-    FourierPositionalEncoder,
+    FourierFeatureEncoder,
+    FourierPeakEncoder,
 )
 from casanovo.denovo.model import (
     DbSpec2Pep,
@@ -1728,34 +1728,62 @@ def test_beam_search_decode(tiny_config):
         assert np.allclose(peptide_scores, peptide_scores[0])
 
 
-def test_fourier_encoder():
-    d_model = 12
-    floats = torch.tensor([1.0, 0.0])
-    wave_lengths = 2 ** torch.arange(1, -5, -1).float()
-    n_float = len(floats)
-    batch_size = 6
-    x = floats.repeat(batch_size, 1)
-    fourier_encoder = FourierFloatEncoder(d_model)
+def test_fourier_peak_encoding():
+    m_max = 2
+    m_min = 0.5
+    d_out = 2
 
-    with_wavelength = x.unsqueeze(-1).repeat(1, 1, 6) * wave_lengths.reshape(
-        1, 1, -1
+    encoder = FourierFeatureEncoder(d_out, m_max, m_min)
+    assert encoder.frequencies.shape == (1, 1, 4)
+    encoder.dim_project.weight.data.fill_(1.0)
+    encoder.dim_project.bias.data.fill_(0.0)
+
+    exp_sin_one = torch.tensor([0.0] * 4).float()
+    exp_cos_one = torch.tensor([-1, 1, 1, 1]).float()
+    exp_sin_zero = exp_sin_one
+    exp_cos_zero = torch.tensor([1.0] * 4).float()
+    input_data = torch.tensor([[1, 0], [0, 1]]).float()
+    expected_output_fourier = torch.stack(
+        [
+            torch.stack(
+                [
+                    torch.cat((exp_sin_one, exp_cos_one)),
+                    torch.cat((exp_sin_zero, exp_cos_zero)),
+                ]
+            ),
+            torch.stack(
+                [
+                    torch.cat((exp_sin_zero, exp_cos_zero)),
+                    torch.cat((exp_sin_one, exp_cos_one)),
+                ]
+            ),
+        ]
     )
-    exp_sin = torch.sin(with_wavelength)
-    exp_cos = torch.cos(with_wavelength)
-    exp = torch.cat([exp_sin, exp_cos], axis=-1)
 
-    fourier_embeddings = fourier_encoder(x)
-    assert fourier_embeddings.shape == (batch_size, n_float, d_model)
-    assert torch.allclose(fourier_embeddings, exp)
+    expected_output = torch.matmul(expected_output_fourier, torch.ones((8, 2)))
+    actual_output = encoder(input_data)
+    assert torch.allclose(expected_output, actual_output)
 
-    fourier_encoder.weave = True
-    exp = torch.empty((batch_size, n_float, d_model))
-    exp[:, :, 0::2] = exp_sin
-    exp[:, :, 1::2] = exp_cos
+    peak_encoder = FourierPeakEncoder(d_out * 2, m_max, m_min)
+    assert peak_encoder.fourier_mz_encoder.frequencies.shape == (1, 1, 4)
+    assert peak_encoder.mz_int_proj.in_features == 2
+    assert peak_encoder.mz_int_proj.out_features == 2
 
-    fourier_embeddings = fourier_encoder(x)
-    assert fourier_embeddings.shape == (batch_size, n_float, d_model)
-    assert torch.allclose(fourier_embeddings, exp)
+    peak_encoder.fourier_mz_encoder = encoder
+    peak_encoder.mz_int_proj.weight.data.fill_(1.0)
+    peak_encoder.mz_int_proj.bias.data.fill_(0.0)
+
+    test_encoder_input = torch.ones((2, 2, 2))
+    test_encoder_input[:, :, 0] = input_data
+    expected_lin_output = input_data + 1
+
+    expected_peak_output = torch.zeros((2, 2, 4))
+    expected_peak_output[:, :, :2] = expected_output
+    expected_peak_output[:, :, 2] = expected_lin_output
+    expected_peak_output[:, :, 3] = expected_lin_output
+
+    actual_output = peak_encoder(test_encoder_input)
+    assert torch.allclose(expected_peak_output, actual_output)
 
 
 def test_fourier_positional_encoder():

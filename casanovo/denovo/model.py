@@ -19,7 +19,6 @@ from ..denovo.transformers import (
     SpectrumEncoder,
     PeptideDecoder,
     FourierPeakEncoder,
-    FourierPositionalEncoder,
 )
 from . import evaluate
 
@@ -122,6 +121,8 @@ class Spec2Pep(pl.LightningModule):
         calculate_precision: bool = False,
         tokenizer: Optional[PeptideTokenizer] = None,
         tb_summarywriter: Optional[SummaryWriter] = None,  # TODO
+        max_encoder_frequency: Optional[float] = 1000,
+        min_encoder_frequency: Optional[float] = 0.0002,
         **kwargs: Dict,
     ):
         super().__init__()
@@ -138,7 +139,11 @@ class Spec2Pep(pl.LightningModule):
             dim_feedforward=dim_feedforward,
             n_layers=n_layers,
             dropout=dropout,
-            peak_encoder=FourierPeakEncoder(dim_model),
+            peak_encoder=FourierPeakEncoder(
+                dim_model,
+                m_max=max_encoder_frequency,
+                m_min=min_encoder_frequency,
+            ),
         )
         self.decoder = PeptideDecoder(
             d_model=dim_model,
@@ -148,7 +153,6 @@ class Spec2Pep(pl.LightningModule):
             n_layers=n_layers,
             dropout=dropout,
             max_charge=max_charge,
-            positional_encoder=FourierPositionalEncoder(dim_model),
         )
         self.softmax = torch.nn.Softmax(2)
         ignore_index = 0

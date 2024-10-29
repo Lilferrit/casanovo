@@ -3,7 +3,6 @@
 from collections.abc import Callable
 from typing import Optional
 
-import einops
 import torch
 from depthcharge.encoders import FloatEncoder, PeakEncoder, PositionalEncoder
 from depthcharge.tokenizers import Tokenizer
@@ -13,45 +12,36 @@ from depthcharge.transformers import (
 )
 
 
-class FourierFloatEncoder(torch.nn.Module):
-    """Fourier Float Value Embeddings
+class FourierFeatureEncoder(torch.nn.Module):
+    """Fourier Feature Embeddings
 
     Parameters
     ----------
     d_model : int
-        The dimensionality of the output embedding.
-
-    start_exp : Optional[int], optional, default=1
-        The starting exponent used to define the range of Fourier frequencies.
-
-    weave : bool, optional, default=False
-        If set to True, the encoder will interleave sine and cosine components
-        in the embeddings tensor, else concatenate sine and cosine components.
+        Size of the third dimension of the output tensor.
+    m_max : Optional[float], default=10000
+        Maximum fourier feature frequency. Should be in the range (1, inf).
+    m_min : Optional[float], default=10**-4
+        Minimum fourier feature frequency. Should be in the range (0, 1)
     """
 
     def __init__(
         self,
-        d_model: int,
-        start_exp: Optional[int] = 1,
-        weave: Optional[bool] = False,
+        d_out: int,
+        m_max: Optional[float] = 1000,
+        m_min: Optional[float] = 10**-4,
     ) -> None:
         """Initialize the MassEncoder."""
         super().__init__()
-
-        # Get dimensions for equations:
-        d_sin = math.ceil(d_model / 2)
-        d_cos = d_model - d_sin
-
-        self.wave_lengths = (
-            2
-            ** torch.arange(
-                start_exp, start_exp - max(d_sin, d_cos), -1
-            ).float()
+        max_component = 1.0 / torch.arange(m_max, 0, -1).float()
+        min_component = 1.0 / (
+            m_min * torch.arange(round(1 / m_min), 0, -1).float()
         )
-
-        self.weave = weave
-        self.register_buffer("sin_term", self.wave_lengths[:d_sin].clone())
-        self.register_buffer("cos_term", self.wave_lengths[:d_cos].clone())
+        frequencies = (
+            2.0 * torch.pi * torch.cat((max_component, min_component))
+        )
+        self.register_buffer("frequencies", frequencies.view(1, 1, -1))
+        self.dim_project = torch.nn.Linear(2 * len(frequencies), d_out)
 
     def forward(self, X: torch.Tensor) -> torch.Tensor:
         """Encode m/z values.
@@ -67,73 +57,52 @@ class FourierFloatEncoder(torch.nn.Module):
             The encoded features for the floating point numbers.
 
         """
-        sin_features = torch.sin(X[:, :, None] * self.sin_term)
-        cos_features = torch.cos(X[:, :, None] * self.cos_term)
-
-        if self.weave:
-            result = torch.empty(
-                (*X.shape, len(self.sin_term) + len(self.cos_term))
-            )
-            result[:, :, 0::2] = sin_features
-            result[:, :, 1::2] = cos_features
-            return result
-        else:
-            return torch.cat([sin_features, cos_features], axis=-1)
+        trig_inputs = X.unsqueeze(-1) * self.frequencies
+        fourier_features = torch.cat(
+            (torch.sin(trig_inputs), torch.cos(trig_inputs)), dim=-1
+        )
+        return self.dim_project(fourier_features)
 
 
-class FourierPeakEncoder(PeakEncoder):
+class FourierPeakEncoder(torch.nn.Module):
     def __init__(
         self,
         d_model: int,
-        start_exp: Optional[int] = 1,
-        weave: Optional[bool] = False,
+        m_max: Optional[float] = 1000,
+        m_min: Optional[float] = 0.0002,
     ) -> None:
-        super().__init__(d_model)
-        self.mz_encoder = FourierFloatEncoder(d_model, start_exp, weave)
-        self.int_encoder = FourierFloatEncoder(d_model, start_exp, weave)
-
-
-class FourierPositionalEncoder(FourierFloatEncoder):
-    def __init__(
-        self,
-        d_model: int,
-        start_exp: Optional[int] = 1,
-        weave: Optional[bool] = False,
-    ) -> None:
-        super().__init__(d_model, start_exp, weave)
+        super().__init__()
+        fourier_encoder_dim = math.ceil(d_model / 2)
+        mz_int_dim = d_model - fourier_encoder_dim
+        self.fourier_mz_encoder = FourierFeatureEncoder(
+            fourier_encoder_dim, m_max=m_max, m_min=m_min
+        )
+        self.mz_int_proj = torch.nn.Linear(2, mz_int_dim)
 
     def forward(self, X: torch.Tensor) -> torch.Tensor:
-        """Encode positions in a sequence.
+        """Encode m/z values and intensities.
+
+        Note that we expect intensities to fall within the interval [0, 1].
 
         Parameters
         ----------
-        X : torch.Tensor of shape (batch_size, n_sequence, n_features)
-            The first dimension should be the batch size (i.e. each is one
-            peptide) and the second dimension should be the sequence (i.e.
-            each should be an amino acid representation).
+        X : torch.Tensor of shape (n_spectra, n_peaks, 2)
+            The spectra to embed. Axis 0 represents a mass spectrum, axis 1
+            contains the peaks in the mass spectrum, and axis 2 is essentially
+            a 2-tuple specifying the m/z-intensity pair for each peak. These
+            should be zero-padded, such that all of the spectra in the batch
+            are the same length.
 
         Returns
         -------
-        torch.Tensor of shape (batch_size, n_sequence, n_features)
+        torch.Tensor of shape (n_spectra, n_peaks, d_model)
             The encoded features for the mass spectra.
 
         """
-        pos = torch.arange(X.shape[1]).type_as(self.sin_term)
-        pos = einops.repeat(pos, "n -> b n", b=X.shape[0])
-        sin_in = einops.repeat(pos, "b n -> b n f", f=len(self.sin_term))
-        cos_in = einops.repeat(pos, "b n -> b n f", f=len(self.cos_term))
-
-        sin_pos = torch.sin(sin_in * self.sin_term)
-        cos_pos = torch.cos(cos_in * self.cos_term)
-
-        if self.weave:
-            encoded = torch.empty(X.shape)
-            encoded[:, :, 0::2] = sin_pos
-            encoded[:, :, 1::2] = cos_pos
-        else:
-            encoded = torch.cat([sin_pos, cos_pos], axis=2)
-
-        return encoded + X
+        return torch.cat(
+            (self.fourier_mz_encoder(X[:, :, 0]), self.mz_int_proj(X)),
+            dim=-1,
+        )
 
 
 class PeptideDecoder(AnalyteTransformerDecoder):
