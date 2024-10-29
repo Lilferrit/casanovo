@@ -31,6 +31,10 @@ from casanovo.config import Config
 from casanovo.data import db_utils, ms_io
 from casanovo.denovo.dataloaders import DeNovoDataModule
 from casanovo.denovo.evaluate import aa_match, aa_match_batch, aa_match_metrics
+from casanovo.denovo.transformers import (
+    FourierFloatEncoder,
+    FourierPositionalEncoder,
+)
 from casanovo.denovo.model import (
     DbSpec2Pep,
     Spec2Pep,
@@ -1743,6 +1747,46 @@ def test_fourier_encoder():
     fourier_embeddings = fourier_encoder(x)
     assert fourier_embeddings.shape == (batch_size, n_float, d_model)
     assert torch.allclose(fourier_embeddings, exp)
+
+    fourier_encoder.weave = True
+    exp = torch.empty((batch_size, n_float, d_model))
+    exp[:, :, 0::2] = exp_sin
+    exp[:, :, 1::2] = exp_cos
+
+    fourier_embeddings = fourier_encoder(x)
+    assert fourier_embeddings.shape == (batch_size, n_float, d_model)
+    assert torch.allclose(fourier_embeddings, exp)
+
+
+def test_fourier_positional_encoder():
+    d_model = 12
+    n_sequence = 4
+    n_features = d_model
+    batch_size = 6
+
+    coefficients = 2 ** torch.arange(1, -5, -1).float()
+    positions = torch.arange(n_sequence).float()
+    trig_inputs_flat = torch.outer(positions, coefficients).float()
+    trig_inputs = einops.repeat(trig_inputs_flat, "n f -> b n f", b=batch_size)
+    exp_sin = torch.sin(trig_inputs)
+    exp_cos = torch.cos(trig_inputs)
+
+    positional_encoder = FourierPositionalEncoder(d_model)
+    expected_encodings = torch.cat([exp_sin, exp_cos], axis=2)
+    actual_encodings = positional_encoder(
+        torch.zeros((batch_size, n_sequence, n_features))
+    )
+    assert actual_encodings.shape == (batch_size, n_sequence, n_features)
+    assert torch.allclose(expected_encodings, actual_encodings)
+
+    positional_encoder.weave = True
+    expected_encodings[:, :, 0::2] = exp_sin
+    expected_encodings[:, :, 1::2] = exp_cos
+    actual_encodings = positional_encoder(
+        torch.zeros((batch_size, n_sequence, n_features))
+    )
+    assert actual_encodings.shape == (batch_size, n_sequence, n_features)
+    assert torch.allclose(expected_encodings, actual_encodings)
 
 
 def test_eval_metrics():

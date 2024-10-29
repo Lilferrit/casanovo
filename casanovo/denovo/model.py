@@ -15,7 +15,12 @@ from depthcharge.tokenizers import PeptideTokenizer
 
 from .. import config
 from ..data import ms_io, psm
-from ..denovo.transformers import PeptideDecoder, SpectrumEncoder
+from ..denovo.transformers import (
+    SpectrumEncoder,
+    PeptideDecoder,
+    FourierPeakEncoder,
+    FourierPositionalEncoder,
+)
 from . import evaluate
 
 logger = logging.getLogger("casanovo")
@@ -133,6 +138,7 @@ class Spec2Pep(pl.LightningModule):
             dim_feedforward=dim_feedforward,
             n_layers=n_layers,
             dropout=dropout,
+            peak_encoder=FourierPeakEncoder(dim_model),
         )
         self.decoder = PeptideDecoder(
             d_model=dim_model,
@@ -142,6 +148,7 @@ class Spec2Pep(pl.LightningModule):
             n_layers=n_layers,
             dropout=dropout,
             max_charge=max_charge,
+            positional_encoder=FourierPositionalEncoder(dim_model),
         )
         self.softmax = torch.nn.Softmax(2)
         ignore_index = 0
