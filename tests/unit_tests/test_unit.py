@@ -1331,7 +1331,6 @@ def test_beam_search_decode(tiny_config):
             residues=config.residues
         ),
     )
-    model.decoder.reverse = False  # For simplicity.
 
     # Sizes.
     batch = 1  # B
@@ -1466,6 +1465,7 @@ def test_beam_search_decode(tiny_config):
     model.max_peptide_len = 0
     # 1 spectrum with 5 peaks (2 values: m/z and intensity).
     mzs = ints = torch.zeros(1, 5)
+    memories, mem_mask = model.encoder(mzs, ints)
     precursors = torch.tensor([[469.25364, 2.0, 235.63410]])
     assert len(list(model.beam_search_decode(mzs, ints, precursors))[0]) == 0
     model.max_peptide_len = 100
