@@ -143,6 +143,15 @@ class Spec2Pep(pl.LightningModule):
             dropout=dropout,
             max_charge=max_charge,
         )
+        self.reverse_decoder = PeptideDecoder(
+            d_model=dim_model,
+            n_tokens=self.tokenizer,
+            n_head=n_head,
+            dim_feedforward=dim_feedforward,
+            n_layers=n_layers,
+            dropout=dropout,
+            max_charge=max_charge,
+        )
         self.softmax = torch.nn.Softmax(2)
         ignore_index = 0
         self.celoss = torch.nn.CrossEntropyLoss(
@@ -215,6 +224,17 @@ class Spec2Pep(pl.LightningModule):
             (iii) precursor information,
             (iv) peptide sequences as torch Tensors.
 
+        pred_peptides : List[
+            Tuple[
+                List[Tuple[float, np.ndarray, str]],
+                List[Tuple[float, np.ndarray, str]],
+            ]
+        ]
+            For each spectrum, a tuple containin a list with the top
+            peptide predictions. A
+            peptide predictions consists of a tuple with the peptide score,
+            the amino acid scores, and the predicted peptide sequence.
+
         Returns
         -------
         pred_peptides : List[List[Tuple[float, np.ndarray, str]]]
@@ -224,39 +244,96 @@ class Spec2Pep(pl.LightningModule):
             sequence.
         """
         mzs, ints, precursors, _ = self._process_batch(batch)
-        return self.beam_search_decode(mzs, ints, precursors)
+        memories, mem_masks = self.encoder(mzs, ints)
+
+        forward_predictions = self.beam_search_decode(
+            mzs, memories, mem_masks, precursors, self.decoder
+        )
+        reverse_predictions = self.beam_search_decode(
+            mzs, memories, mem_masks, precursors, self.reverse_decoder
+        )
+
+        # Reverse predictions from reverse decoder
+        for spectrum_idx, prediction_queue in reverse_predictions.items():
+            reversed_predictions = []
+            for (
+                peptide_score,
+                tie_breaker,
+                aa_scores,
+                peptide,
+            ) in prediction_queue:
+                reversed_aa_scores = aa_scores[::-1]
+                reversed_peptide = _reverse_sequences(
+                    peptide.unsqueeze(0),
+                    self.tokenizer,
+                ).squeeze(0)
+
+                reversed_prediction = (
+                    peptide_score,
+                    tie_breaker,
+                    reversed_aa_scores,
+                    reversed_peptide,
+                )
+
+                reversed_predictions.append(reversed_prediction)
+
+            reverse_predictions[spectrum_idx] = reversed_predictions
+
+        # Merge prediction queues
+        for (
+            rev_spectrum_idx,
+            rev_prediction_queue,
+        ) in reverse_predictions.items():
+            if rev_spectrum_idx not in forward_predictions:
+                forward_predictions[rev_spectrum_idx] = rev_prediction_queue
+                continue
+
+            forward_predictions[rev_spectrum_idx] = list(
+                heapq.merge(
+                    forward_predictions[rev_spectrum_idx], rev_prediction_queue
+                )
+            )
+
+        return list(self._get_top_peptide(forward_predictions))
 
     def beam_search_decode(
-        self, mzs: torch.Tensor, ints: torch.Tensor, precursors: torch.Tensor
-    ) -> List[List[Tuple[float, np.ndarray, str]]]:
+        self,
+        mzs: torch.Tensor,
+        memories: torch.Tensor,
+        mem_masks: torch.Tensor,
+        precursors: torch.Tensor,
+        decoder: PeptideDecoder,
+    ) -> Dict[int, List[Tuple[float, float, np.ndarray, torch.Tensor]]]:
         """
         Beam search decoding of the spectrum predictions.
 
         Parameters
         ----------
         mzs : torch.Tensor of shape (n_spectra, n_peaks)
-            The m/z axis of spectra for which to predict peptide sequences.
-            Axis 0 represents an MS/MS spectrum, axis 1 contains the peaks in
-            the MS/MS spectrum. These should be zero-padded,
-            such that all the spectra in the batch are the same length.
-        ints: torch.Tensor of shape (n_spectra, n_peaks)
-            The m/z axis of spectra for which to predict peptide sequences.
-            Axis 0 represents an MS/MS spectrum, axis 1 specifies
-            the m/z-intensity pair for each peak. These should be zero-padded,
-            such that all the spectra in the batch are the same length.
-        precursors : torch.Tensor of size (n_spectra, 3)
-            The measured precursor mass (axis 0), precursor charge (axis 1), and
-            precursor m/z (axis 2) of each MS/MS spectrum.
+            The zero padded m/z values for each spectrum
+        memories : torch.Tensor
+            Encoded representations of the spectra
+        mem_masks : torch.Tensor
+            Masks for memory positions that should be ignored in decoding,
+            with shape matching the `memories` tensor.
+        precursors : torch.Tensor of shape (n_spectra, 3)
+            Precursor information for each spectrum, containing
+            (precursor_mass, precursor_charge, and precursor_mz) for each
+            spectrum.
+        decoder : PeptideDecoder
+            The decoder model used to predict amino acid sequences
 
         Returns
         -------
-        pred_peptides : List[List[Tuple[float, np.ndarray, str]]]
-            For each spectrum, a list with the top peptide prediction(s). A
-            peptide predictions consists of a tuple with the peptide score,
-            the amino acid scores, and the predicted peptide sequence.
+        pred_cache : Dict[
+            int, List[Tuple[float, float, np.ndarray, torch.Tensor]]
+        ]:
+            For each spectrum, a priority queue containing peptide predictions
+            ordered by confidence score, with a random float used to break
+            ties. Each item in a peptide prediction priority queue contains
+            the peptide level score, a random tie breaking float, amino
+            acid level scores, and the predicted peptide.
         """
-        memories, mem_masks = self.encoder(mzs, ints)
-
         # Sizes.
         batch = mzs.shape[0]  # B
         length = self.max_peptide_len + 1  # L
@@ -272,11 +349,11 @@ class Spec2Pep(pl.LightningModule):
             batch, length, beam, dtype=torch.int64, device=self.encoder.device
         )
 
-        # Create cache for decoded beams.
+        # Create cache for decoded beams
         pred_cache = collections.OrderedDict((i, []) for i in range(batch))
 
         # Get the first prediction.
-        pred = self.decoder(
+        pred = decoder(
             tokens=torch.zeros(
                 batch, 0, dtype=torch.int64, device=self.encoder.device
             ),
@@ -320,7 +397,7 @@ class Spec2Pep(pl.LightningModule):
             if finished_beams.all():
                 break
             # Update the scores.
-            scores[~finished_beams, : step + 2, :] = self.decoder(
+            scores[~finished_beams, : step + 2, :] = decoder(
                 tokens=tokens[~finished_beams, : step + 1],
                 precursors=precursors[~finished_beams, :],
                 memory=memories[~finished_beams, :, :],
@@ -333,9 +410,8 @@ class Spec2Pep(pl.LightningModule):
             )
             tokens = tokens
 
-        # Return the peptide with the highest confidence score, within the
-        # precursor m/z tolerance if possible.
-        return list(self._get_top_peptide(pred_cache))
+        # Return cached predictions
+        return pred_cache
 
     def _finish_beams(
         self,
@@ -740,24 +816,25 @@ class Spec2Pep(pl.LightningModule):
 
     def _process_batch(self, batch):
         """Prepare batch returned from AnnotatedSpectrumDataset of the
-            latest depthcharge version
 
         Each batch is a dict and contains these keys:
              ['peak_file', 'scan_id', 'ms_level', 'precursor_mz',
              'precursor_charge', 'mz_array', 'intensity_array',
-             'seq']
+             'seq' (optional)]
+
         Returns
         -------
-        spectra : torch.Tensor of shape (batch_size, n_peaks, 2)
-            The padded mass spectra tensor with the m/z and intensity peak values
-            for each spectrum.
+        mzs : torch.Tensor of shape (batch_size, n_peaks)
+            Zero padded m/z values for each spectrum
+        ints : torch.Tensor of shape (batch_size, n_peaks)
+            Zero padded intensity values for each spectrum
         precursors : torch.Tensor of shape (batch_size, 3)
-            A tensor with the precursor neutral mass, precursor charge, and
-            precursor m/z.
-        seqs : np.ndarray
-            The spectrum identifiers (during de novo sequencing) or peptide
-            sequences (during training).
-
+            Precursor information for each spectrum, containing
+            (precursor_mass, precursor_charge, and precursor_mz) for each
+            spectrum
+        seqs : torch.Tensor (1, batch_size, max_length) or None
+            True peptide sequences for each spectrum if given annotated
+            spectra, else None.
         """
         for k in batch.keys():
             try:
@@ -796,10 +873,16 @@ class Spec2Pep(pl.LightningModule):
 
         Returns
         -------
-        scores : torch.Tensor of shape (n_spectra, length, n_amino_acids)
-            The individual amino acid scores for each prediction.
+        decoded : torch.Tensor of shape (n_spectra, length, n_amino_acids)
+            The predicted amino acid scores for each spectrum, representing
+            individual amino acid predictions.
         tokens : torch.Tensor of shape (n_spectra, length)
-            The predicted tokens for each spectrum.
+            The ground truth token sequences for each spectrum.
+        reverse_decoded : torch.Tensor (n_spectra, length, n_amino_acids)
+            The predicted reversed amino acid scores for each spectrum,
+            generated by the reversed decoder.
+        reverse_tokens : torch.Tensor of shape (n_spectra, length)
+            The reversed ground truth token sequences for each spectrum.
         """
         mzs, ints, precursors, tokens = self._process_batch(batch)
         memories, mem_masks = self.encoder(mzs, ints)
@@ -809,7 +892,16 @@ class Spec2Pep(pl.LightningModule):
             memory_key_padding_mask=mem_masks,
             precursors=precursors,
         )
-        return decoded, tokens
+
+        reverse_tokens = _reverse_sequences(tokens, self.tokenizer)
+        reverse_decoded = self.reverse_decoder(
+            tokens=reverse_tokens,
+            memory=memories,
+            memory_key_padding_mask=mem_masks,
+            precursors=precursors,
+        )
+
+        return decoded, tokens, reverse_decoded, reverse_tokens
 
     def training_step(
         self,
@@ -835,12 +927,14 @@ class Spec2Pep(pl.LightningModule):
         torch.Tensor
             The loss of the training step.
         """
-        pred, truth = self._forward_step(batch)
+        pred, truth, rev_pred, rev_truth = self._forward_step(batch)
         pred = pred[:, :-1, :].reshape(-1, self.vocab_size)
         if mode == "train":
             loss = self.celoss(pred, truth.flatten())
+            loss += self.celoss(rev_pred, rev_truth.flatten())
         else:
             loss = self.val_celoss(pred, truth.flatten())
+            loss += self.val_celoss(rev_pred, rev_truth.flatten())
         self.log(
             f"{mode}_CELoss",
             loss.detach(),
@@ -1500,6 +1594,24 @@ def _aa_pep_score(
     if not fits_precursor_mz:
         peptide_score -= 1
     return aa_scores, peptide_score
+
+
+def _reverse_sequences(
+    sequences: torch.Tensor, tokenizer: PeptideTokenizer
+) -> torch.Tensor:
+    reversed_sequences = torch.full_like(sequences, tokenizer.padding_int)
+    for i, row in enumerate(sequences):
+        for j, sequence in enumerate(row):
+            pad_mask = sequence == tokenizer.padding_int
+            strt_stp_mask = sequence == tokenizer.start_int
+            strt_stp_mask |= sequence == tokenizer.stop_int
+            tokens_mask = ~pad_mask & ~strt_stp_mask
+            reversed_sequences[i, j][tokens_mask] = torch.flip(
+                sequence[tokens_mask], dims=(0,)
+            )
+            reversed_sequences[i, j][strt_stp_mask] = sequence[strt_stp_mask]
+
+    return reversed_sequences
 
 
 def generate_tgt_mask(sz: int) -> torch.Tensor:
