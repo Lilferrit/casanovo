@@ -251,7 +251,7 @@ class DeNovoDataModule(pl.LightningDataModule):
 
     def make_dataset(self, paths, annotated, mode, shuffle):
         """Make spectrum datasets.
-        
+
         Parameters
         ----------
         paths : Iterable[str]
@@ -388,9 +388,6 @@ class DeNovoDataModule(pl.LightningDataModule):
             pin_memory=True,
             num_workers=self.n_workers,
             shuffle=shuffle,
-            num_workers=0,  # self.n_workers,
-            # precision=torch.float32,
-            pin_memory=True,
         )
 
     def train_dataloader(self) -> torch.utils.data.DataLoader:

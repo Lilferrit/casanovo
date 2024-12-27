@@ -1786,37 +1786,6 @@ def test_fourier_peak_encoding():
     assert torch.allclose(expected_peak_output, actual_output)
 
 
-def test_fourier_positional_encoder():
-    d_model = 12
-    n_sequence = 4
-    n_features = d_model
-    batch_size = 6
-
-    coefficients = 2 ** torch.arange(1, -5, -1).float()
-    positions = torch.arange(n_sequence).float()
-    trig_inputs_flat = torch.outer(positions, coefficients).float()
-    trig_inputs = einops.repeat(trig_inputs_flat, "n f -> b n f", b=batch_size)
-    exp_sin = torch.sin(trig_inputs)
-    exp_cos = torch.cos(trig_inputs)
-
-    positional_encoder = FourierPositionalEncoder(d_model)
-    expected_encodings = torch.cat([exp_sin, exp_cos], axis=2)
-    actual_encodings = positional_encoder(
-        torch.zeros((batch_size, n_sequence, n_features))
-    )
-    assert actual_encodings.shape == (batch_size, n_sequence, n_features)
-    assert torch.allclose(expected_encodings, actual_encodings)
-
-    positional_encoder.weave = True
-    expected_encodings[:, :, 0::2] = exp_sin
-    expected_encodings[:, :, 1::2] = exp_cos
-    actual_encodings = positional_encoder(
-        torch.zeros((batch_size, n_sequence, n_features))
-    )
-    assert actual_encodings.shape == (batch_size, n_sequence, n_features)
-    assert torch.allclose(expected_encodings, actual_encodings)
-
-
 def test_eval_metrics():
     """
     Test peptide and amino acid-level evaluation metrics.

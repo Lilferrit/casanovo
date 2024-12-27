@@ -120,7 +120,6 @@ class Spec2Pep(pl.LightningModule):
         out_writer: Optional[ms_io.MztabWriter] = None,
         calculate_precision: bool = False,
         tokenizer: Optional[PeptideTokenizer] = None,
-        tb_summarywriter: Optional[SummaryWriter] = None,  # TODO
         max_encoder_frequency: Optional[float] = 1000,
         min_encoder_frequency: Optional[float] = 0.0002,
         **kwargs: Dict,
@@ -957,7 +956,7 @@ class Spec2Pep(pl.LightningModule):
             for peptide_score, aa_scores, peptide in spectrum_preds:
                 predictions.append(
                     (
-                        scan[0],
+                        scan,
                         precursor_charge,
                         precursor_mz,
                         peptide,

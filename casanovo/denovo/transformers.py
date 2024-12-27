@@ -1,5 +1,6 @@
 """Transformer encoder and decoder for the de novo sequencing task."""
 
+import math
 from collections.abc import Callable
 from typing import Optional
 
