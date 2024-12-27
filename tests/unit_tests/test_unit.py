@@ -1467,7 +1467,16 @@ def test_beam_search_decode(tiny_config):
     mzs = ints = torch.zeros(1, 5)
     memories, mem_mask = model.encoder(mzs, ints)
     precursors = torch.tensor([[469.25364, 2.0, 235.63410]])
-    assert len(list(model.beam_search_decode(mzs, ints, precursors))[0]) == 0
+    assert (
+        len(
+            list(
+                model.beam_search_decode(
+                    mzs, memories, mem_mask, precursors, model.decoder
+                )[0]
+            )
+        )
+        == 0
+    )
     model.max_peptide_len = 100
 
     # Re-initialize scores and tokens to further test caching functionality.

@@ -928,9 +928,7 @@ class Spec2Pep(pl.LightningModule):
         """
         pred, truth, rev_pred, rev_truth = self._forward_step(batch)
         pred = pred[:, :-1, :].reshape(-1, self.vocab_size)
-
-        print(pred.shape)
-        print(truth.shape)
+        rev_pred = rev_pred[:, :-1, :].reshape(-1, self.vocab_size)
 
         if mode == "train":
             loss = self.celoss(pred, truth.flatten())
@@ -1043,7 +1041,7 @@ class Spec2Pep(pl.LightningModule):
             for peptide_score, aa_scores, peptide in spectrum_preds:
                 predictions.append(
                     (
-                        scan[0],
+                        scan,
                         precursor_charge,
                         precursor_mz,
                         peptide,
@@ -1243,7 +1241,7 @@ class DbSpec2Pep(Spec2Pep):
 
         predictions_all = collections.defaultdict(list)
         for psm_batch in self._psm_batches(batch):
-            pred, truth = self._forward_step(psm_batch)
+            pred, truth, _, _ = self._forward_step(psm_batch)
             pred = self.softmax(pred)
             batch_peptide_scores, batch_aa_scores = _calc_match_score(
                 pred,
