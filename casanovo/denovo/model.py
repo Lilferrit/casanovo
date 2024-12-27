@@ -120,8 +120,6 @@ class Spec2Pep(pl.LightningModule):
         out_writer: Optional[ms_io.MztabWriter] = None,
         calculate_precision: bool = False,
         tokenizer: Optional[PeptideTokenizer] = None,
-        max_encoder_frequency: Optional[float] = 1000,
-        min_encoder_frequency: Optional[float] = 0.0002,
         **kwargs: Dict,
     ):
         super().__init__()
@@ -138,11 +136,7 @@ class Spec2Pep(pl.LightningModule):
             dim_feedforward=dim_feedforward,
             n_layers=n_layers,
             dropout=dropout,
-            peak_encoder=FourierPeakEncoder(
-                dim_model,
-                m_max=max_encoder_frequency,
-                m_min=min_encoder_frequency,
-            ),
+            peak_encoder=FourierPeakEncoder(dim_model),
         )
         self.decoder = PeptideDecoder(
             d_model=dim_model,

@@ -524,8 +524,6 @@ class ModelRunner:
             out_writer=self.writer,
             calculate_precision=self.config.calculate_precision,
             tokenizer=tokenizer,
-            max_encoder_frequency=self.config.max_encoder_frequency,
-            min_encoder_frequency=self.config.min_encoder_frequency,
         )
 
         # Reconfigurable non-architecture related parameters for a

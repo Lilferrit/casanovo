@@ -68,8 +68,6 @@ class Config:
         n_layers=int,
         dropout=float,
         dim_intensity=int,
-        max_encoder_frequency=float,
-        min_encoder_frequency=float,
         max_peptide_len=int,
         residues=dict,
         n_log=int,

@@ -30,7 +30,7 @@ class FourierFeatureEncoder(torch.nn.Module):
         self,
         d_out: int,
         m_max: Optional[float] = 1000,
-        m_min: Optional[float] = 10**-4,
+        m_min: Optional[float] = 0.0002,
     ) -> None:
         """Initialize the MassEncoder."""
         super().__init__()

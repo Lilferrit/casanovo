@@ -290,8 +290,6 @@ def get_config_file(file_path, file_name, additional_cfg=None):
         "remove_precursor_tol": 2.0,
         "max_charge": 10,
         "dim_model": 512,
-        "max_encoder_frequency": 1000,
-        "min_encoder_frequency": 0.0002,
         "dropout": 0.0,
         "dim_intensity": None,
         "learning_rate": 5e-4,
