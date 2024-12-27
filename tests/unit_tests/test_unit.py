@@ -31,10 +31,6 @@ from casanovo.config import Config
 from casanovo.data import db_utils, ms_io
 from casanovo.denovo.dataloaders import DeNovoDataModule
 from casanovo.denovo.evaluate import aa_match, aa_match_batch, aa_match_metrics
-from casanovo.denovo.transformers import (
-    FourierFeatureEncoder,
-    FourierPeakEncoder,
-)
 from casanovo.denovo.model import (
     DbSpec2Pep,
     Spec2Pep,
@@ -1726,65 +1722,6 @@ def test_beam_search_decode(tiny_config):
         assert len(preds) == beam
         peptide_scores = [pep[0] for pep in preds]
         assert np.allclose(peptide_scores, peptide_scores[0])
-
-
-def test_fourier_peak_encoding():
-    m_max = 2
-    m_min = 0.5
-    d_out = 2
-    d_fourier = 2
-
-    encoder = FourierFeatureEncoder(d_out, m_max, m_min)
-    assert encoder.frequencies.shape == (1, 1, 4)
-    encoder.dim_project.weight.data.fill_(1.0)
-    encoder.dim_project.bias.data.fill_(0.0)
-
-    exp_sin_one = torch.tensor([0.0] * 4).float()
-    exp_cos_one = torch.tensor([-1, 1, 1, 1]).float()
-    exp_sin_zero = exp_sin_one
-    exp_cos_zero = torch.tensor([1.0] * 4).float()
-    input_data = torch.tensor([[1, 0], [0, 1]]).float()
-    expected_output_fourier = torch.stack(
-        [
-            torch.stack(
-                [
-                    torch.cat((exp_sin_one, exp_cos_one)),
-                    torch.cat((exp_sin_zero, exp_cos_zero)),
-                ]
-            ),
-            torch.stack(
-                [
-                    torch.cat((exp_sin_zero, exp_cos_zero)),
-                    torch.cat((exp_sin_one, exp_cos_one)),
-                ]
-            ),
-        ]
-    )
-
-    expected_output = torch.matmul(expected_output_fourier, torch.ones((8, 2)))
-    actual_output = encoder(input_data)
-    assert torch.allclose(expected_output, actual_output)
-
-    peak_encoder = FourierPeakEncoder(d_out * 2, d_fourier, m_max, m_min)
-    assert peak_encoder.fourier_mz_encoder.frequencies.shape == (1, 1, 4)
-    assert peak_encoder.mz_int_proj.in_features == 2
-    assert peak_encoder.mz_int_proj.out_features == 2
-
-    peak_encoder.fourier_mz_encoder = encoder
-    peak_encoder.mz_int_proj.weight.data.fill_(1.0)
-    peak_encoder.mz_int_proj.bias.data.fill_(0.0)
-
-    test_encoder_input = torch.ones((2, 2, 2))
-    test_encoder_input[:, :, 0] = input_data
-    expected_lin_output = input_data + 1
-
-    expected_peak_output = torch.zeros((2, 2, 4))
-    expected_peak_output[:, :, :2] = expected_output
-    expected_peak_output[:, :, 2] = expected_lin_output
-    expected_peak_output[:, :, 3] = expected_lin_output
-
-    actual_output = peak_encoder(test_encoder_input)
-    assert torch.allclose(expected_peak_output, actual_output)
 
 
 def test_eval_metrics():

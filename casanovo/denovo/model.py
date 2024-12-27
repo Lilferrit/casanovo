@@ -18,7 +18,7 @@ from ..data import ms_io, psm
 from ..denovo.transformers import (
     SpectrumEncoder,
     PeptideDecoder,
-    FourierPeakEncoder,
+    SineLatentPeakEncoder,
 )
 from . import evaluate
 
@@ -101,7 +101,7 @@ class Spec2Pep(pl.LightningModule):
     def __init__(
         self,
         dim_model: int = 512,
-        dim_fourier: int = 488,
+        dim_sin: int = 488,
         n_head: int = 8,
         dim_feedforward: int = 1024,
         n_layers: int = 9,
@@ -137,7 +137,7 @@ class Spec2Pep(pl.LightningModule):
             dim_feedforward=dim_feedforward,
             n_layers=n_layers,
             dropout=dropout,
-            peak_encoder=FourierPeakEncoder(dim_model, dim_fourier),
+            peak_encoder=SineLatentPeakEncoder(dim_model, dim_sin),
         )
         self.decoder = PeptideDecoder(
             d_model=dim_model,
@@ -861,7 +861,6 @@ class Spec2Pep(pl.LightningModule):
                 "CUDA Mem Remaining",
                 free_mem,
                 on_step=False,
-                on_epoch=True,
                 sync_dist=True,
                 batch_size=pred.shape[0],
             )

@@ -12,8 +12,8 @@ from depthcharge.transformers import (
 )
 
 
-class FourierFeatureEncoder(torch.nn.Module):
-    """Fourier Feature Embeddings
+class SineLatentEncoder(torch.nn.Module):
+    """Latent Sinusoidal embedding space encoder
 
     Parameters
     ----------
@@ -28,20 +28,18 @@ class FourierFeatureEncoder(torch.nn.Module):
     def __init__(
         self,
         d_out: int,
-        m_max: Optional[float] = 1000,
-        m_min: Optional[float] = 0.0002,
+        d_latent: Optional[int] = 12000,
+        max_wavelength: Optional[float] = 0.001,
+        min_wavelength: Optional[float] = 10000,
     ) -> None:
         """Initialize the MassEncoder."""
         super().__init__()
-        max_component = 1.0 / torch.arange(m_max, 0, -1).float()
-        min_component = 1.0 / (
-            m_min * torch.arange(round(1 / m_min), 0, -1).float()
+        self.sine_encoder = FloatEncoder(
+            d_model=d_latent,
+            max_wavelength=max_wavelength,
+            min_wavelength=min_wavelength,
         )
-        frequencies = (
-            2.0 * torch.pi * torch.cat((max_component, min_component))
-        )
-        self.register_buffer("frequencies", frequencies.view(1, 1, -1))
-        self.dim_project = torch.nn.Linear(2 * len(frequencies), d_out)
+        self.dim_project = torch.nn.Linear(d_latent, d_out)
 
     def forward(self, X: torch.Tensor) -> torch.Tensor:
         """Encode m/z values.
@@ -57,32 +55,32 @@ class FourierFeatureEncoder(torch.nn.Module):
             The encoded features for the floating point numbers.
 
         """
-        trig_inputs = X.unsqueeze(-1) * self.frequencies
-        fourier_features = torch.cat(
-            (torch.sin(trig_inputs), torch.cos(trig_inputs)), dim=-1
-        )
-        return self.dim_project(fourier_features)
+        return self.dim_project(self.sine_encoder(X))
 
 
-class FourierPeakEncoder(torch.nn.Module):
+class SineLatentPeakEncoder(torch.nn.Module):
     def __init__(
         self,
         d_model: int,
-        d_fourier: int,
-        m_max: Optional[float] = 1000,
-        m_min: Optional[float] = 0.0002,
+        d_sin: int,
+        d_latent: Optional[int] = 12000,
+        max_mz_wavelength: Optional[float] = 0.001,
+        min_mz_wavelength: Optional[float] = 10000,
     ) -> None:
         super().__init__()
 
-        if d_fourier >= d_model:
+        if d_sin >= d_model:
             raise ValueError(
-                f"Fourier Dimension ({d_fourier}) must be smaller"
+                f"Fourier Dimension ({d_sin}) must be smaller"
                 f" than embedding dimension ({d_model})"
             )
 
-        mz_int_dim = d_model - d_fourier
-        self.fourier_mz_encoder = FourierFeatureEncoder(
-            d_out=d_fourier, m_max=m_max, m_min=m_min
+        mz_int_dim = d_model - d_sin
+        self.sine_mz_encoder = SineLatentEncoder(
+            d_out=d_sin,
+            d_latent=d_latent,
+            max_wavelength=max_mz_wavelength,
+            min_wavelength=min_mz_wavelength,
         )
         self.mz_int_proj = torch.nn.Linear(2, mz_int_dim)
 
@@ -106,9 +104,10 @@ class FourierPeakEncoder(torch.nn.Module):
             The encoded features for the mass spectra.
 
         """
-        fourier_features = self.fourier_mz_encoder(X[:, :, 0])
-        mz_linear_encoding = self.mz_int_proj(X)
-        return torch.cat((fourier_features, mz_linear_encoding), dim=-1)
+        return torch.cat(
+            (self.sine_mz_encoder(X[:, :, 0]), self.mz_int_proj(X)),
+            dim=-1,
+        )
 
 
 class PeptideDecoder(AnalyteTransformerDecoder):
