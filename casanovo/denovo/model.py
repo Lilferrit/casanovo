@@ -116,7 +116,6 @@ class Spec2Pep(pl.LightningModule):
         out_writer: Optional[ms_io.MztabWriter] = None,
         calculate_precision: bool = False,
         tokenizer: Optional[PeptideTokenizer] = None,
-        tb_summarywriter: Optional[SummaryWriter] = None,  # TODO
         **kwargs: Dict,
     ):
         super().__init__()
@@ -929,6 +928,10 @@ class Spec2Pep(pl.LightningModule):
         """
         pred, truth, rev_pred, rev_truth = self._forward_step(batch)
         pred = pred[:, :-1, :].reshape(-1, self.vocab_size)
+
+        print(pred.shape)
+        print(truth.shape)
+
         if mode == "train":
             loss = self.celoss(pred, truth.flatten())
             loss += self.celoss(rev_pred, rev_truth.flatten())

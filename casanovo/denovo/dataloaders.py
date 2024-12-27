@@ -214,44 +214,9 @@ class DeNovoDataModule(pl.LightningDataModule):
 
         return dataset
 
-        self.n_workers = n_workers if n_workers is not None else os.cpu_count()
-        self.shuffle = (
-            shuffle if shuffle else None
-        )  # set to None if not wanted. Otherwise torch throws and error
-        self.buffer_size = buffer_size
-
-        self.valid_charge = np.arange(1, max_charge + 1)
-        self.preprocessing_fn = [
-            preprocessing.set_mz_range(min_mz=min_mz, max_mz=max_mz),
-            preprocessing.remove_precursor_peak(remove_precursor_tol, "Da"),
-            preprocessing.filter_intensity(min_intensity, n_peaks),
-            preprocessing.scale_intensity("root", 1),
-            scale_to_unit_norm,
-        ]
-        self.custom_field_test_mgf = [
-            CustomField(
-                "scans",
-                lambda x: (
-                    x["params"]["scans"]
-                    if "scans" in x["params"]
-                    else x["params"]["title"]
-                ),
-                pa.string(),
-            ),
-            CustomField("title", lambda x: x["params"]["title"], pa.string()),
-        ]
-        self.custom_field_test_mzml = [
-            CustomField("scans", lambda x: x["id"], pa.string()),
-            CustomField("title", lambda x: x["id"], pa.string()),
-        ]
-
-        self.custom_field_anno = [
-            CustomField("seq", lambda x: x["params"]["seq"], pa.string())
-        ]
-
     def make_dataset(self, paths, annotated, mode, shuffle):
         """Make spectrum datasets.
-        
+
         Parameters
         ----------
         paths : Iterable[str]
@@ -385,11 +350,8 @@ class DeNovoDataModule(pl.LightningDataModule):
         return DataLoader(
             dataset,
             batch_size=None,
-            pin_memory=True,
             num_workers=self.n_workers,
             shuffle=shuffle,
-            num_workers=0,  # self.n_workers,
-            # precision=torch.float32,
             pin_memory=True,
         )
 
