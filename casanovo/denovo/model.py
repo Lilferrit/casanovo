@@ -483,15 +483,10 @@ class Spec2Pep(pl.LightningModule):
             pred_tokens = tokens[i][: step + 1]
             peptide_len = len(pred_tokens)
             # Omit stop token.
-            if self.tokenizer.reverse and pred_tokens[0] == self.stop_token:
-                pred_tokens = pred_tokens[1:]
-                peptide_len -= 1
-            elif (
-                not self.tokenizer.reverse
-                and pred_tokens[-1] == self.stop_token
-            ):
+            if pred_tokens[-1] == self.stop_token:
                 pred_tokens = pred_tokens[:-1]
                 peptide_len -= 1
+
             # Discard beams that were predicted to end but don't fit the minimum
             # peptide length.
             if finished_beams[i] and peptide_len < self.min_peptide_len:
@@ -875,24 +870,27 @@ class Spec2Pep(pl.LightningModule):
             reverse_tokens,
         ) = self._process_batch(batch)
 
-        logger.info("=" * 20)
-        logger.info("FORWARD TOKENS: %s", str(forward_tokens.tolist()))
-        logger.info("REVERSE TOKENS: %s", str(reverse_tokens.tolist()))
-        logger.info("=" * 20)
-
         memories, mem_masks = self.encoder(mzs, ints)
-        forward_decoded = self.reverse_decoder(
-            tokens=forward_tokens,
-            memory=memories,
-            memory_key_padding_mask=mem_masks,
-            precursors=precursors,
+        forward_decoded = (
+            None
+            if forward_tokens is None
+            else self.forward_decoder(
+                tokens=forward_tokens,
+                memory=memories,
+                memory_key_padding_mask=mem_masks,
+                precursors=precursors,
+            )
         )
 
-        reverse_decoded = self.reverse_decoder(
-            tokens=reverse_tokens,
-            memory=memories,
-            memory_key_padding_mask=mem_masks,
-            precursors=precursors,
+        reverse_decoded = (
+            None
+            if reverse_tokens is None
+            else self.reverse_decoder(
+                tokens=reverse_tokens,
+                memory=memories,
+                memory_key_padding_mask=mem_masks,
+                precursors=precursors,
+            )
         )
 
         return forward_decoded, forward_tokens, reverse_decoded, reverse_tokens
@@ -1616,24 +1614,6 @@ def _aa_pep_score(
     if not fits_precursor_mz:
         peptide_score -= 1
     return aa_scores, peptide_score
-
-
-def _reverse_sequences(
-    sequences: torch.Tensor, tokenizer: PeptideTokenizer
-) -> torch.Tensor:
-    reversed_sequences = torch.full_like(sequences, tokenizer.padding_int)
-    for i, row in enumerate(sequences):
-        for j, sequence in enumerate(row):
-            pad_mask = sequence == tokenizer.padding_int
-            strt_stp_mask = sequence == tokenizer.start_int
-            strt_stp_mask |= sequence == tokenizer.stop_int
-            tokens_mask = ~pad_mask & ~strt_stp_mask
-            reversed_sequences[i, j][tokens_mask] = torch.flip(
-                sequence[tokens_mask], dims=(0,)
-            )
-            reversed_sequences[i, j][strt_stp_mask] = sequence[strt_stp_mask]
-
-    return reversed_sequences
 
 
 def generate_tgt_mask(sz: int) -> torch.Tensor:
