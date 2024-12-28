@@ -1393,7 +1393,7 @@ def test_beam_search_decode(tiny_config):
 
     # Verify that the correct peptides have been cached.
     correct_cached = 0
-    for _, _, _, pep in pred_cache[0]:
+    for _, _, _, _, pep in pred_cache[0]:
         if torch.equal(pep, model.tokenizer.tokenize("PEPK")[0]):
             correct_cached += 1
         elif torch.equal(pep, model.tokenizer.tokenize("PEPR")[0]):
@@ -1411,15 +1411,15 @@ def test_beam_search_decode(tiny_config):
     test_cache = collections.OrderedDict((i, []) for i in range(batch))
     heapq.heappush(
         test_cache[0],
-        (0.93, 0.1, 4 * [0.93], model.tokenizer.tokenize("PEPY")[0]),
+        (0.93, 0.1, False, 4 * [0.93], model.tokenizer.tokenize("PEPY")[0]),
     )
     heapq.heappush(
         test_cache[0],
-        (0.95, 0.2, 4 * [0.95], model.tokenizer.tokenize("PEPK")[0]),
+        (0.95, 0.2, False, 4 * [0.95], model.tokenizer.tokenize("PEPK")[0]),
     )
     heapq.heappush(
         test_cache[0],
-        (0.94, 0.3, 4 * [0.94], model.tokenizer.tokenize("PEPP")[0]),
+        (0.94, 0.3, False, 4 * [0.94], model.tokenizer.tokenize("PEPP")[0]),
     )
 
     assert torch.equal(
@@ -1471,7 +1471,7 @@ def test_beam_search_decode(tiny_config):
         len(
             list(
                 model.beam_search_decode(
-                    mzs, memories, mem_mask, precursors, model.decoder
+                    mzs, memories, mem_mask, precursors, model.forward_decoder
                 )[0]
             )
         )
@@ -1503,7 +1503,7 @@ def test_beam_search_decode(tiny_config):
     )
     # Verify predictions with matching/non-matching precursor m/z.
     positive_score = negative_score = 0
-    for peptide_score, _, _, _ in pred_cache[0]:
+    for peptide_score, _, _, _, _ in pred_cache[0]:
         positive_score += peptide_score >= 0
         negative_score += peptide_score < 0
     assert positive_score == 2
@@ -1519,7 +1519,6 @@ def test_beam_search_decode(tiny_config):
     )
     vocab = len(model.tokenizer) + 1
     beam = model.n_beams  # S
-    model.decoder.reverse = False  # For simplicity.
     step = 4
 
     # Initialize scores and tokens.
@@ -1842,6 +1841,9 @@ def test_spectrum_id_mzml(mzml_small, tmp_path):
 def test_train_val_step_functions():
     """Test train and validation step functions operating on batches."""
     tokenizer = depthcharge.tokenizers.peptides.MskbPeptideTokenizer()
+    reversed_tokenizer = depthcharge.tokenizers.peptides.MskbPeptideTokenizer(
+        reverse=True
+    )
     model = Spec2Pep(
         n_beams=1,
         residues="massivekb",
@@ -1856,6 +1858,7 @@ def test_train_val_step_functions():
         "precursor_mz": torch.tensor(235.63410).unsqueeze(0),
         "precursor_charge": torch.tensor(2.0).unsqueeze(0),
         "seq": tokenizer.tokenize(["PEPK"]),
+        "seq_reversed": reversed_tokenizer.tokenize(["PEPK"]),
     }
     train_batch = {key: val.unsqueeze(0) for key, val in batch.items()}
     val_batch = copy.deepcopy(train_batch)

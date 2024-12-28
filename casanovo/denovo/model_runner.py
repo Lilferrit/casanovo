@@ -616,7 +616,7 @@ class ModelRunner:
         self.tokenizer = tokenizer_cs(
             residues=self.config.residues,
             replace_isoleucine_with_leucine=self.config.replace_isoleucine_with_leucine,
-            reverse=self.config.reverse_peptides,
+            reverse=False,
             start_token=None,
             stop_token="$",
         )

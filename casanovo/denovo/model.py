@@ -1,6 +1,7 @@
 """A de novo peptide sequencing model."""
 
 import collections
+import contextlib
 import heapq
 import itertools
 import logging
@@ -16,6 +17,7 @@ from depthcharge.tokenizers import PeptideTokenizer
 from .. import config
 from ..data import ms_io, psm
 from ..denovo.transformers import PeptideDecoder, SpectrumEncoder
+from ..utils import temporary_reverse
 from . import evaluate
 
 logger = logging.getLogger("casanovo")
@@ -133,7 +135,7 @@ class Spec2Pep(pl.LightningModule):
             n_layers=n_layers,
             dropout=dropout,
         )
-        self.decoder = PeptideDecoder(
+        self.forward_decoder = PeptideDecoder(
             d_model=dim_model,
             n_tokens=self.tokenizer,
             n_head=n_head,
@@ -211,7 +213,7 @@ class Spec2Pep(pl.LightningModule):
 
     def forward(
         self, batch: dict
-    ) -> List[List[Tuple[float, np.ndarray, str]]]:
+    ) -> List[List[Tuple[float, bool, np.ndarray, List[int]]]]:
         """
         Predict peptide sequences for a batch of MS/MS spectra.
 
@@ -242,41 +244,16 @@ class Spec2Pep(pl.LightningModule):
             score, the amino acid scores, and the predicted peptide
             sequence.
         """
-        mzs, ints, precursors, _ = self._process_batch(batch)
+        mzs, ints, precursors, _, _ = self._process_batch(batch)
         memories, mem_masks = self.encoder(mzs, ints)
 
         forward_predictions = self.beam_search_decode(
-            mzs, memories, mem_masks, precursors, self.decoder
+            mzs, memories, mem_masks, precursors, self.forward_decoder
         )
-        reverse_predictions = self.beam_search_decode(
-            mzs, memories, mem_masks, precursors, self.reverse_decoder
-        )
-
-        # Reverse predictions from reverse decoder
-        for spectrum_idx, prediction_queue in reverse_predictions.items():
-            reversed_predictions = []
-            for (
-                peptide_score,
-                tie_breaker,
-                aa_scores,
-                peptide,
-            ) in prediction_queue:
-                reversed_aa_scores = aa_scores[::-1]
-                reversed_peptide = _reverse_sequences(
-                    peptide.unsqueeze(0),
-                    self.tokenizer,
-                ).squeeze(0)
-
-                reversed_prediction = (
-                    peptide_score,
-                    tie_breaker,
-                    reversed_aa_scores,
-                    reversed_peptide,
-                )
-
-                reversed_predictions.append(reversed_prediction)
-
-            reverse_predictions[spectrum_idx] = reversed_predictions
+        with temporary_reverse(self.tokenizer):
+            reverse_predictions = self.beam_search_decode(
+                mzs, memories, mem_masks, precursors, self.reverse_decoder
+            )
 
         # Merge prediction queues
         for (
@@ -302,7 +279,7 @@ class Spec2Pep(pl.LightningModule):
         mem_masks: torch.Tensor,
         precursors: torch.Tensor,
         decoder: PeptideDecoder,
-    ) -> Dict[int, List[Tuple[float, float, np.ndarray, torch.Tensor]]]:
+    ) -> Dict[int, List[Tuple[float, float, bool, np.ndarray, torch.Tensor]]]:
         """
         Beam search decoding of the spectrum predictions.
 
@@ -325,13 +302,14 @@ class Spec2Pep(pl.LightningModule):
         Returns
         -------
         pred_cache : Dict[
-            int, List[Tuple[float, float, np.ndarray, torch.Tensor]]
+            int, List[Tuple[float, float, bool, np.ndarray, torch.Tensor]]
         ]:
             For each spectrum, a priority queue containing peptide predictions
             ordered by confidence score, with a random float used to break
             ties. Each item in a peptide prediction priority queue contains
-            the peptide level score, a random tie breaking float, amino
-            acid level scores, and the predicted peptide.
+            the peptide level score, a random tie breaking float, a bool
+            indicating whether the sequence is reversed, amino acid level
+            scores, and the predicted peptide.
         """
         # Sizes.
         batch = mzs.shape[0]  # B
@@ -460,7 +438,7 @@ class Spec2Pep(pl.LightningModule):
                 for aa in self.tokenizer.index
                 if aa.startswith("[") and aa.endswith("]-")
             ]
-        ).to(self.decoder.device)
+        ).to(self.forward_decoder.device)
 
         beam_fits_precursor = torch.zeros(
             tokens.shape[0], dtype=torch.bool
@@ -600,7 +578,7 @@ class Spec2Pep(pl.LightningModule):
         beams_to_cache: torch.Tensor,
         beam_fits_precursor: torch.Tensor,
         pred_cache: Dict[
-            int, List[Tuple[float, float, np.ndarray, torch.Tensor]]
+            int, List[Tuple[float, float, bool, np.ndarray, torch.Tensor]]
         ],
     ):
         """
@@ -623,12 +601,13 @@ class Spec2Pep(pl.LightningModule):
             Boolean tensor indicating whether the beams are within the
             precursor m/z tolerance.
         pred_cache : Dict[
-                int, List[Tuple[float, float, np.ndarray, torch.Tensor]]
+                int, List[Tuple[float, float, bool, np.ndarray, torch.Tensor]]
         ]
             Priority queue with finished beams for each spectrum, ordered by
             peptide score. For each finished beam, a tuple with the (negated)
-            peptide score, a random tie-breaking float, the amino acid-level
-            scores, and the predicted tokens is stored.
+            peptide score, a random tie-breaking float, a bool indicating
+            whether the sequence is reversed, the amino acid-level scores, and
+            the predicted tokens is stored.
         """
         for i in range(len(beams_to_cache)):
             if not beams_to_cache[i]:
@@ -672,6 +651,7 @@ class Spec2Pep(pl.LightningModule):
                 (
                     peptide_score,
                     np.random.random_sample(),
+                    self.tokenizer.reverse,
                     aa_scores,
                     torch.clone(pred_peptide),
                 ),
@@ -773,9 +753,9 @@ class Spec2Pep(pl.LightningModule):
     def _get_top_peptide(
         self,
         pred_cache: Dict[
-            int, List[Tuple[float, float, np.ndarray, torch.Tensor]]
+            int, List[Tuple[float, float, bool, np.ndarray, torch.Tensor]]
         ],
-    ) -> Iterable[List[Tuple[float, np.ndarray, str]]]:
+    ) -> Iterable[List[Tuple[float, bool, np.ndarray, str]]]:
         """
         Return the peptide with the highest confidence score for each
         spectrum.
@@ -803,10 +783,11 @@ class Spec2Pep(pl.LightningModule):
                 yield [
                     (
                         pep_score,
+                        is_reversed,
                         aa_scores,
                         pred_tokens,
                     )
-                    for pep_score, _, aa_scores, pred_tokens in heapq.nlargest(
+                    for pep_score, _, is_reversed, aa_scores, pred_tokens in heapq.nlargest(
                         self.top_match, peptides
                     )
                 ]
@@ -851,9 +832,12 @@ class Spec2Pep(pl.LightningModule):
         mzs, ints = batch["mz_array"], batch["intensity_array"]
         # spectra = torch.stack([mzs, ints], dim=2)
 
-        seqs = batch["seq"] if "seq" in batch else None
+        forward_seqs = batch["seq"] if "seq" in batch else None
+        reverse_seqs = (
+            batch["seq_reversed"] if "seq_reversed" in batch else None
+        )
 
-        return mzs, ints, precursors, seqs
+        return mzs, ints, precursors, forward_seqs, reverse_seqs
 
     def _forward_step(
         self,
@@ -883,16 +867,27 @@ class Spec2Pep(pl.LightningModule):
         reverse_tokens : torch.Tensor of shape (n_spectra, length)
             The reversed ground truth token sequences for each spectrum.
         """
-        mzs, ints, precursors, tokens = self._process_batch(batch)
+        (
+            mzs,
+            ints,
+            precursors,
+            forward_tokens,
+            reverse_tokens,
+        ) = self._process_batch(batch)
+
+        logger.info("=" * 20)
+        logger.info("FORWARD TOKENS: %s", str(forward_tokens.tolist()))
+        logger.info("REVERSE TOKENS: %s", str(reverse_tokens.tolist()))
+        logger.info("=" * 20)
+
         memories, mem_masks = self.encoder(mzs, ints)
-        decoded = self.decoder(
-            tokens=tokens,
+        forward_decoded = self.reverse_decoder(
+            tokens=forward_tokens,
             memory=memories,
             memory_key_padding_mask=mem_masks,
             precursors=precursors,
         )
 
-        reverse_tokens = _reverse_sequences(tokens, self.tokenizer)
         reverse_decoded = self.reverse_decoder(
             tokens=reverse_tokens,
             memory=memories,
@@ -900,7 +895,7 @@ class Spec2Pep(pl.LightningModule):
             precursors=precursors,
         )
 
-        return decoded, tokens, reverse_decoded, reverse_tokens
+        return forward_decoded, forward_tokens, reverse_decoded, reverse_tokens
 
     def training_step(
         self,
@@ -931,11 +926,13 @@ class Spec2Pep(pl.LightningModule):
         rev_pred = rev_pred[:, :-1, :].reshape(-1, self.vocab_size)
 
         if mode == "train":
-            loss = self.celoss(pred, truth.flatten())
-            loss += self.celoss(rev_pred, rev_truth.flatten())
+            loss = self.celoss(pred, truth.flatten()) + self.celoss(
+                rev_pred, rev_truth.flatten()
+            )
         else:
-            loss = self.val_celoss(pred, truth.flatten())
-            loss += self.val_celoss(rev_pred, rev_truth.flatten())
+            loss = self.val_celoss(pred, truth.flatten()) + self.val_celoss(
+                rev_pred, rev_truth.flatten()
+            )
         self.log(
             f"{mode}_CELoss",
             loss.detach(),
@@ -978,12 +975,20 @@ class Spec2Pep(pl.LightningModule):
         ]
         peptides_pred = []
         for spectrum_preds in self.forward(batch):
-            for _, _, pred in spectrum_preds:
-                peptides_pred.append(pred)
-        peptides_pred = [
-            "".join(p)
-            for p in self.tokenizer.detokenize(peptides_pred, join=False)
-        ]
+            for _, is_reversed, _, pred in spectrum_preds:
+                with (
+                    temporary_reverse(self.tokenizer)
+                    if is_reversed
+                    else contextlib.nullcontext()
+                ):
+                    peptides_pred.append(
+                        "".join(
+                            self.tokenizer.detokenize(
+                                pred.unsqueeze(0), join=False
+                            )[0]
+                        )
+                    )
+
         batch_size = len(peptides_true)
         aa_precision, _, pep_precision = evaluate.aa_match_metrics(
             *evaluate.aa_match_batch(
@@ -1021,7 +1026,7 @@ class Spec2Pep(pl.LightningModule):
         predictions: List[ms_io.PepSpecMatch]
             Predicted PSMs for the given batch of spectra.
         """
-        _, _, precursors, _ = self._process_batch(batch)
+        _, _, precursors, _, _ = self._process_batch(batch)
         prec_charges = precursors[:, 1].cpu().detach().numpy()
         prec_mzs = precursors[:, 2].cpu().detach().numpy()
         predictions = []
@@ -1038,12 +1043,18 @@ class Spec2Pep(pl.LightningModule):
             batch["peak_file"],
             self.forward(batch),
         ):
-            for peptide_score, aa_scores, peptide in spectrum_preds:
+            for (
+                peptide_score,
+                is_reversed,
+                aa_scores,
+                peptide,
+            ) in spectrum_preds:
                 predictions.append(
                     (
                         scan,
                         precursor_charge,
                         precursor_mz,
+                        is_reversed,
                         peptide,
                         peptide_score,
                         aa_scores,
@@ -1102,8 +1113,9 @@ class Spec2Pep(pl.LightningModule):
         # Triply nested lists: results -> batch -> step -> spectrum.
         for (
             scan,
-            charge,
+            precursor_charge,
             precursor_mz,
+            is_reversed,
             peptide,
             peptide_score,
             aa_scores,
@@ -1114,18 +1126,27 @@ class Spec2Pep(pl.LightningModule):
 
             # Compute mass and detokenize
             calc_mass = self.tokenizer.calculate_precursor_ions(
-                peptide.unsqueeze(0), torch.tensor([charge]).type_as(peptide)
+                peptide.unsqueeze(0),
+                torch.tensor([precursor_charge]).type_as(peptide),
             )[0]
-            peptide = "".join(
-                self.tokenizer.detokenize(peptide.unsqueeze(0), join=False)[0]
-            )
+
+            with (
+                temporary_reverse(self.tokenizer)
+                if is_reversed
+                else contextlib.nullcontext()
+            ):
+                peptide = "".join(
+                    self.tokenizer.detokenize(
+                        peptide.unsqueeze(0), join=False
+                    )[0]
+                )
 
             self.out_writer.psms.append(
                 psm.PepSpecMatch(
                     sequence=peptide,
                     spectrum_id=(file_name, scan),
                     peptide_score=peptide_score,
-                    charge=int(charge),
+                    charge=int(precursor_charge),
                     calc_mz=calc_mass.item(),
                     exp_mz=precursor_mz,
                     aa_scores=aa_scores,

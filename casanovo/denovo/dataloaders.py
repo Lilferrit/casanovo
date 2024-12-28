@@ -21,7 +21,56 @@ from depthcharge.tokenizers import PeptideTokenizer
 from torch.utils.data import DataLoader
 from torch.utils.data.datapipes.iter.combinatorics import ShufflerIterDataPipe
 
+from ..utils import temporary_reverse
+
 logger = logging.getLogger("casanovo")
+
+
+class DuelAnnotatedSpectrumDataset(AnnotatedSpectrumDataset):
+    """See depthcharge.AnnotatedSpectrumDataset"""
+
+    def __init__(
+        self,
+        spectra,
+        annotations,
+        tokenizer,
+        batch_size,
+        path=None,
+        parse_kwargs=None,
+        **kwargs,
+    ):
+        super().__init__(
+            spectra,
+            annotations,
+            tokenizer,
+            batch_size,
+            path,
+            parse_kwargs,
+            **kwargs,
+        )
+
+    def _to_tensor(self, batch):
+        """Convert a record batch to tensor
+
+        see depthcharge.AnnotatedSpectrumDataset._to_tensor
+        """
+        batch = super(AnnotatedSpectrumDataset, self)._to_tensor(batch)
+        forward_tokens = self.tokenizer.tokenize(
+            batch[self.annotations],
+            add_start=self.tokenizer.start_token is not None,
+            add_stop=self.tokenizer.stop_token is not None,
+        )
+        with temporary_reverse(self.tokenizer):
+            reverse_tokens = self.tokenizer.tokenize(
+                batch[self.annotations],
+                add_start=self.tokenizer.start_token is not None,
+                add_stop=self.tokenizer.stop_token is not None,
+            )
+
+        batch[self.annotations] = forward_tokens
+        batch[self.annotations + "_reversed"] = reverse_tokens
+
+        return batch
 
 
 class DeNovoDataModule(pl.LightningDataModule):
@@ -184,7 +233,7 @@ class DeNovoDataModule(pl.LightningDataModule):
 
         if any([Path(f).suffix in (".lance") for f in paths]):
             if annotated:
-                dataset = AnnotatedSpectrumDataset.from_lance(
+                dataset = DuelAnnotatedSpectrumDataset.from_lance(
                     paths[0], **anno_dataset_params
                 )
             else:
@@ -193,84 +242,7 @@ class DeNovoDataModule(pl.LightningDataModule):
                 )
         else:
             if annotated:
-                dataset = AnnotatedSpectrumDataset(
-                    spectra=paths,
-                    path=lance_path,
-                    parse_kwargs=parse_kwargs,
-                    **anno_dataset_params,
-                )
-            else:
-                dataset = SpectrumDataset(
-                    spectra=paths,
-                    path=lance_path,
-                    parse_kwargs=parse_kwargs,
-                    **dataset_params,
-                )
-
-        if shuffle:
-            dataset = ShufflerIterDataPipe(
-                dataset, buffer_size=self.buffer_size
-            )
-
-        return dataset
-
-    def make_dataset(self, paths, annotated, mode, shuffle):
-        """Make spectrum datasets.
-
-        Parameters
-        ----------
-        paths : Iterable[str]
-            Paths to input datasets
-        annotated: bool
-            True if peptide sequence annotations are available for the test
-            data.
-        mode: str {"train", "valid", "test"}
-            The mode indicating name of lance instance
-        shuffle: bool
-            Indicates whether to shuffle training data based on buffer_size
-        """
-        custom_fields = self.custom_field_anno if annotated else []
-
-        if mode == "test":
-            if all([Path(f).suffix in (".mgf") for f in paths]):
-                custom_fields = custom_fields + self.custom_field_test_mgf
-            if all(
-                [Path(f).suffix in (".mzml", ".mzxml", ".mzML") for f in paths]
-            ):
-                custom_fields = custom_fields + self.custom_field_test_mzml
-
-        lance_path = f"{self.lance_dir}/{mode}.lance"
-
-        parse_kwargs = dict(
-            preprocessing_fn=self.preprocessing_fn,
-            custom_fields=custom_fields,
-            valid_charge=self.valid_charge,
-        )
-
-        dataset_params = dict(
-            batch_size=(
-                self.train_batch_size
-                if mode == "train"
-                else self.eval_batch_size
-            )
-        )
-        anno_dataset_params = dataset_params | dict(
-            tokenizer=self.tokenizer,
-            annotations="seq",
-        )
-
-        if any([Path(f).suffix in (".lance") for f in paths]):
-            if annotated:
-                dataset = AnnotatedSpectrumDataset.from_lance(
-                    paths[0], **anno_dataset_params
-                )
-            else:
-                dataset = SpectrumDataset.from_lance(
-                    paths[0], **dataset_params
-                )
-        else:
-            if annotated:
-                dataset = AnnotatedSpectrumDataset(
+                dataset = DuelAnnotatedSpectrumDataset(
                     spectra=paths,
                     path=lance_path,
                     parse_kwargs=parse_kwargs,

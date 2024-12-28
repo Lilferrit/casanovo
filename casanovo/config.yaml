@@ -153,8 +153,6 @@ precision: "32-true" # '16-true', '16-mixed', 'bf16-true', 'bf16-mixed', '32-tru
 
 # Replace I by L in peptide sequences
 replace_isoleucine_with_leucine: True
-# Reverse peptide sequences
-reverse_peptides: True
 # mskb tokenizer, otherwise proforma syntax
 mskb_tokenizer: True
 

@@ -1,5 +1,6 @@
 """Small utility functions"""
 
+import contextlib
 import logging
 import os
 import pathlib
@@ -8,12 +9,13 @@ import re
 import socket
 import sys
 from datetime import datetime
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, Generator, Iterable, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 import psutil
 import torch
+from depthcharge.tokenizers import PeptideTokenizer
 
 from .data.psm import PepSpecMatch
 
@@ -285,3 +287,26 @@ def check_dir_file_exists(
                 f"File matching wildcard pattern {pattern} already exist in"
                 f"{dir} and can not be overwritten."
             )
+
+
+@contextlib.contextmanager
+def temporary_reverse(
+    tokenizer: PeptideTokenizer,
+) -> Generator[None, None, None]:
+    """
+    Temporarily set the `reverse` attribute of a PeptideTokenizer.
+
+    Resets to the original value after the after context is exited.
+
+    Parameters
+    ----------
+    tokenizer : PeptideTokenizer
+        tokenizer to set the reverse attribute of
+    reverse : bool
+        the value that the `reverse` attribute will be temporarily set to.
+    """
+    tokenizer.reverse = True
+    try:
+        yield
+    finally:
+        tokenizer.reverse = False

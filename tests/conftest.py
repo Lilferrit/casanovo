@@ -262,7 +262,7 @@ def get_config_file(file_path, file_name, additional_cfg=None):
         "train_label_smoothing": 0.01,
         "warmup_iters": 1,
         "cosine_schedule_period_iters": 1,
-        "max_epochs": 20,
+        "max_epochs": 30,
         "val_check_interval": 1,
         "val_patience_interval": -1,
         "accelerator": "cpu",
@@ -305,7 +305,6 @@ def get_config_file(file_path, file_name, additional_cfg=None):
         "gradient_clip_algorithm": None,
         "precision": "32-true",
         "replace_isoleucine_with_leucine": True,
-        "reverse_peptides": False,
         "mskb_tokenizer": True,
         "residues": {
             "G": 57.021464,

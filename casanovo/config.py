@@ -93,7 +93,6 @@ class Config:
         lance_dir=str,
         shuffle=bool,
         buffer_size=int,
-        reverse_peptides=bool,
         replace_isoleucine_with_leucine=bool,
         accumulate_grad_batches=int,
         gradient_clip_val=float,
