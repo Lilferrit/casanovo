@@ -178,13 +178,13 @@ class SpectrumEncoder(SpectrumTransformerEncoder):
         return self.latent_spectrum.squeeze(0).expand(mz_array.shape[0], -1)
 
 
-class NeutralLossSpectrumTransformerEncoder(SpectrumTransformerEncoder):
+class NeutralLossSpectrumEncoder(SpectrumTransformerEncoder):
     ADDUCT_MASS = 1.007825
 
     def __init__(
         self,
         d_model: int = 128,
-        nhead: int = 8,
+        n_head: int = 8,
         dim_feedforward: int = 1024,
         n_layers: int = 1,
         dropout: float = 0.0,
@@ -193,7 +193,7 @@ class NeutralLossSpectrumTransformerEncoder(SpectrumTransformerEncoder):
     ) -> None:
         super().__init__(
             d_model=d_model,
-            nhead=nhead,
+            nhead=n_head,
             dim_feedforward=dim_feedforward,
             n_layers=n_layers,
             dropout=dropout,
@@ -211,8 +211,7 @@ class NeutralLossSpectrumTransformerEncoder(SpectrumTransformerEncoder):
         self,
         mz_array: torch.Tensor,
         intensity_array: torch.Tensor,
-        precursor_mz: torch.Tensor,
-        precursor_charge: torch.Tensor,
+        precursor_mass: torch.Tensor,
         *args: torch.Tensor,
         mask: torch.Tensor | None = None,
         **kwargs: dict,
@@ -224,7 +223,9 @@ class NeutralLossSpectrumTransformerEncoder(SpectrumTransformerEncoder):
         mz_array : torch.Tensor of shape (n_spectra, n_peaks)
             The zero-padded m/z dimension for a batch of mass spectra.
         intensity_array : torch.Tensor of shape (n_spectra, n_peaks)
-            The zero-padded intensity dimension for a batch of mass spctra.
+            The zero-padded intensity dimension for a batch of mass spectra.
+        precursor_mass : torch.Tensor of shape (n_spectra,)
+            The precursor mass values for each mass spectrum in the batch.
         *args : torch.Tensor
             Additional data. These may be used by overwriting the
             `global_token_hook()` method in a subclass.
@@ -265,8 +266,7 @@ class NeutralLossSpectrumTransformerEncoder(SpectrumTransformerEncoder):
 
         # Compute neutral loss spectrum assuming assumes [M+H]x  ions
         # a la Bittremieux et al.
-        neutral_mass = (precursor_mz - self.ADDUCT_MASS) * precursor_charge
-        nl_mz_array = (neutral_mass[:, None] + self.ADDUCT_MASS) - mz_array
+        nl_mz_array = (precursor_mass[:, None] + self.ADDUCT_MASS) - mz_array
 
         normal_peaks = self.peak_encoder(
             torch.stack([mz_array, intensity_array], dim=2)

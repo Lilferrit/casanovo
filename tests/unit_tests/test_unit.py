@@ -37,7 +37,7 @@ from casanovo.denovo.model import (
     _aa_pep_score,
     _calc_match_score,
 )
-from casanovo.denovo.transformers import NeutralLossSpectrumTransformerEncoder
+from casanovo.denovo.transformers import NeutralLossSpectrumEncoder
 
 
 def test_version():
@@ -1834,9 +1834,9 @@ def test_spectrum_id_mzml(mzml_small, tmp_path):
 def test_neutral_loss_spectrum_transformer_encoder():
     # Initialize the encoder
     d_model = 16  # Smaller dimension for testing
-    encoder = NeutralLossSpectrumTransformerEncoder(
+    encoder = NeutralLossSpectrumEncoder(
         d_model=d_model,
-        nhead=4,
+        n_head=4,
         dim_feedforward=32,
         n_layers=2,
         dropout=0.1,
@@ -1863,15 +1863,13 @@ def test_neutral_loss_spectrum_transformer_encoder():
         ]
     )  # Shape: (2, 3)
 
-    precursor_mz = torch.tensor([500.0, 600.0])  # Shape: (2,)
-    precursor_charge = torch.tensor([1, 2])  # Shape: (2,)
+    precursor_mass = torch.tensor([500.0, 300.0])  # Shape: (2,)
 
     # Forward pass
     out, mask = encoder(
         mz_array=mz_array,
         intensity_array=intensity_array,
-        precursor_mz=precursor_mz,
-        precursor_charge=precursor_charge,
+        precursor_mass=precursor_mass,
     )
 
     assert out.shape == (batch_size, expected_sequence_length, d_model)

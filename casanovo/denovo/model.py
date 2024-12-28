@@ -15,7 +15,7 @@ from depthcharge.tokenizers import PeptideTokenizer
 
 from .. import config
 from ..data import ms_io, psm
-from ..denovo.transformers import PeptideDecoder, SpectrumEncoder
+from ..denovo.transformers import PeptideDecoder, NeutralLossSpectrumEncoder
 from . import evaluate
 
 logger = logging.getLogger("casanovo")
@@ -126,7 +126,7 @@ class Spec2Pep(pl.LightningModule):
         )
         self.vocab_size = len(self.tokenizer) + 1
         # Build the model.
-        self.encoder = SpectrumEncoder(
+        self.encoder = NeutralLossSpectrumEncoder(
             d_model=dim_model,
             n_head=n_head,
             dim_feedforward=dim_feedforward,
@@ -245,7 +245,9 @@ class Spec2Pep(pl.LightningModule):
             peptide predictions consists of a tuple with the peptide score,
             the amino acid scores, and the predicted peptide sequence.
         """
-        memories, mem_masks = self.encoder(mzs, ints)
+        memories, mem_masks = self.encoder(
+            mzs, ints, precursors[:, 0].flatten()
+        )
 
         # Sizes.
         batch = mzs.shape[0]  # B
@@ -793,7 +795,9 @@ class Spec2Pep(pl.LightningModule):
             The predicted tokens for each spectrum.
         """
         mzs, ints, precursors, tokens = self._process_batch(batch)
-        memories, mem_masks = self.encoder(mzs, ints)
+        memories, mem_masks = self.encoder(
+            mzs, ints, precursors[:, 0].flatten()
+        )
         decoded = self.decoder(
             tokens=tokens,
             memory=memories,
