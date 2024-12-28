@@ -176,3 +176,119 @@ class SpectrumEncoder(SpectrumTransformerEncoder):
 
         """
         return self.latent_spectrum.squeeze(0).expand(mz_array.shape[0], -1)
+
+
+class NeutralLossSpectrumTransformerEncoder(SpectrumTransformerEncoder):
+    ADDUCT_MASS = 1.007825
+
+    def __init__(
+        self,
+        d_model: int = 128,
+        nhead: int = 8,
+        dim_feedforward: int = 1024,
+        n_layers: int = 1,
+        dropout: float = 0.0,
+        peak_encoder: PeakEncoder | Callable | bool = True,
+        neutral_loss_encoder: PeakEncoder | Callable | bool = True,
+    ) -> None:
+        super().__init__(
+            d_model=d_model,
+            nhead=nhead,
+            dim_feedforward=dim_feedforward,
+            n_layers=n_layers,
+            dropout=dropout,
+            peak_encoder=peak_encoder,
+        )
+
+        if callable(neutral_loss_encoder):
+            self.neutral_loss_encoder = neutral_loss_encoder
+        elif neutral_loss_encoder:
+            self.neutral_loss_encoder = PeakEncoder(self.d_model)
+        else:
+            self.neutral_loss_encoder = torch.nn.Linear(2, self.d_model)
+
+    def forward(
+        self,
+        mz_array: torch.Tensor,
+        intensity_array: torch.Tensor,
+        precursor_mz: torch.Tensor,
+        precursor_charge: torch.Tensor,
+        *args: torch.Tensor,
+        mask: torch.Tensor | None = None,
+        **kwargs: dict,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Embed a batch of mass spectra.
+
+        Parameters
+        ----------
+        mz_array : torch.Tensor of shape (n_spectra, n_peaks)
+            The zero-padded m/z dimension for a batch of mass spectra.
+        intensity_array : torch.Tensor of shape (n_spectra, n_peaks)
+            The zero-padded intensity dimension for a batch of mass spctra.
+        *args : torch.Tensor
+            Additional data. These may be used by overwriting the
+            `global_token_hook()` method in a subclass.
+        mask : torch.Tensor
+            Passed to `torch.nn.TransformerEncoder.forward()`. The mask
+            for the sequence.
+        **kwargs : dict
+            Additional data fields. These may be used by overwriting
+            the `global_token_hook()` method in a subclass.
+
+        Returns
+        -------
+        latent : torch.Tensor of shape (n_spectra, n_peaks + 1, d_model)
+            The latent representations for the spectrum and each of its
+            peaks.
+        mem_mask : torch.Tensor
+            The memory mask specifying which elements were padding in X.
+
+        """
+        spectra = torch.stack([mz_array, intensity_array], dim=2)
+        src_key_padding_mask = spectra.sum(dim=2) == 0
+
+        # src_key_padding mask will be the same for both neutral loss and
+        # normal spectra
+        src_key_padding_mask = torch.cat(
+            (src_key_padding_mask, src_key_padding_mask), dim=1
+        )
+
+        global_token_mask = torch.zeros(
+            (src_key_padding_mask.shape[0], 1),
+            dtype=src_key_padding_mask.dtype,
+            device=src_key_padding_mask.device,
+        ).bool()
+
+        src_key_padding_mask = torch.cat(
+            [global_token_mask, src_key_padding_mask], dim=1
+        )
+
+        # Compute neutral loss spectrum assuming assumes [M+H]x  ions
+        # a la Bittremieux et al.
+        neutral_mass = (precursor_mz - self.ADDUCT_MASS) * precursor_charge
+        nl_mz_array = (neutral_mass[:, None] + self.ADDUCT_MASS) - mz_array
+
+        normal_peaks = self.peak_encoder(
+            torch.stack([mz_array, intensity_array], dim=2)
+        )
+        nl_peaks = self.neutral_loss_encoder(
+            torch.stack([nl_mz_array, intensity_array], dim=2)
+        )
+
+        combined_peaks = torch.cat([normal_peaks, nl_peaks], dim=1)
+        latent_spectra = self.global_token_hook(
+            *args,
+            mz_array=mz_array,
+            intensity_array=intensity_array,
+            **kwargs,
+        )
+        combined_peaks = torch.cat(
+            [latent_spectra[:, None, :], combined_peaks], dim=1
+        )
+
+        out = self.transformer_encoder(
+            combined_peaks,
+            mask=mask,
+            src_key_padding_mask=src_key_padding_mask,
+        )
+        return out, src_key_padding_mask

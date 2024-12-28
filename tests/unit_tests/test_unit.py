@@ -37,6 +37,7 @@ from casanovo.denovo.model import (
     _aa_pep_score,
     _calc_match_score,
 )
+from casanovo.denovo.transformers import NeutralLossSpectrumTransformerEncoder
 
 
 def test_version():
@@ -1828,6 +1829,62 @@ def test_spectrum_id_mzml(mzml_small, tmp_path):
     ):
         assert dataset[i]["peak_file"][0] == filename.name
         assert dataset[i]["scan_id"][0] == f"scan={scan_nr}"
+
+
+def test_neutral_loss_spectrum_transformer_encoder():
+    # Initialize the encoder
+    d_model = 16  # Smaller dimension for testing
+    encoder = NeutralLossSpectrumTransformerEncoder(
+        d_model=d_model,
+        nhead=4,
+        dim_feedforward=32,
+        n_layers=2,
+        dropout=0.1,
+        peak_encoder=True,
+        neutral_loss_encoder=True,
+    )
+
+    batch_size = 2
+    n_peaks = 3
+    expected_sequence_length = 2 * n_peaks + 1
+
+    # Test shape of outputs
+    mz_array = torch.tensor(
+        [
+            [100.0, 200.0, 300.0],
+            [150.0, 250.0, 0.0],  # Last peak is padding
+        ]
+    )  # Shape: (2, 3)
+
+    intensity_array = torch.tensor(
+        [
+            [10.0, 20.0, 30.0],
+            [15.0, 25.0, 0.0],  # Last peak is padding
+        ]
+    )  # Shape: (2, 3)
+
+    precursor_mz = torch.tensor([500.0, 600.0])  # Shape: (2,)
+    precursor_charge = torch.tensor([1, 2])  # Shape: (2,)
+
+    # Forward pass
+    out, mask = encoder(
+        mz_array=mz_array,
+        intensity_array=intensity_array,
+        precursor_mz=precursor_mz,
+        precursor_charge=precursor_charge,
+    )
+
+    assert out.shape == (batch_size, expected_sequence_length, d_model)
+    assert mask.shape == (batch_size, expected_sequence_length)
+
+    expected_mask = torch.tensor(
+        [
+            [False, False, False, False, False, False, False],
+            [False, False, False, True, False, False, True],
+        ]
+    )  # Shape: (2, 7)
+
+    assert torch.equal(mask, expected_mask)
 
 
 def test_train_val_step_functions():
