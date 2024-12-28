@@ -1846,7 +1846,7 @@ def test_neutral_loss_spectrum_transformer_encoder():
 
     batch_size = 2
     n_peaks = 3
-    expected_sequence_length = 2 * n_peaks + 1
+    expected_sequence_length = 2 * (n_peaks + 1) + 1
 
     # Test shape of outputs
     mz_array = torch.tensor(
@@ -1863,13 +1863,15 @@ def test_neutral_loss_spectrum_transformer_encoder():
         ]
     )  # Shape: (2, 3)
 
-    precursor_mass = torch.tensor([500.0, 300.0])  # Shape: (2,)
+    precursor_mass = torch.tensor([500.0, 600.0])  # Shape: (2,)
+    precursor_mz = torch.tensor([500.0, 300.0])
 
     # Forward pass
     out, mask = encoder(
         mz_array=mz_array,
         intensity_array=intensity_array,
         precursor_mass=precursor_mass,
+        precursor_mz=precursor_mz,
     )
 
     assert out.shape == (batch_size, expected_sequence_length, d_model)
@@ -1877,10 +1879,10 @@ def test_neutral_loss_spectrum_transformer_encoder():
 
     expected_mask = torch.tensor(
         [
-            [False, False, False, False, False, False, False],
-            [False, False, False, True, False, False, True],
+            [False, False, False, False, False, False, False, False, False],
+            [False, False, False, False, True, False, False, False, True],
         ]
-    )  # Shape: (2, 7)
+    )  # Shape: (2, 9)
 
     assert torch.equal(mask, expected_mask)
 

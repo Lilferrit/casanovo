@@ -246,7 +246,7 @@ class Spec2Pep(pl.LightningModule):
             the amino acid scores, and the predicted peptide sequence.
         """
         memories, mem_masks = self.encoder(
-            mzs, ints, precursors[:, 0].flatten()
+            mzs, ints, precursors[:, 0].flatten(), precursors[:, 2].flatten()
         )
 
         # Sizes.
@@ -796,7 +796,7 @@ class Spec2Pep(pl.LightningModule):
         """
         mzs, ints, precursors, tokens = self._process_batch(batch)
         memories, mem_masks = self.encoder(
-            mzs, ints, precursors[:, 0].flatten()
+            mzs, ints, precursors[:, 0].flatten(), precursors[:, 2].flatten()
         )
         decoded = self.decoder(
             tokens=tokens,

@@ -212,6 +212,7 @@ class NeutralLossSpectrumEncoder(SpectrumTransformerEncoder):
         mz_array: torch.Tensor,
         intensity_array: torch.Tensor,
         precursor_mass: torch.Tensor,
+        precursor_mz: torch.Tensor,
         *args: torch.Tensor,
         mask: torch.Tensor | None = None,
         **kwargs: dict,
@@ -245,6 +246,17 @@ class NeutralLossSpectrumEncoder(SpectrumTransformerEncoder):
             The memory mask specifying which elements were padding in X.
 
         """
+        # Create ghost peak (spooky)
+        batch_size = len(precursor_mass)
+        ghost_mz = precursor_mz.view(-1, 1)
+        ghost_intensity = torch.full(
+            (batch_size, 1), 1.1, device=mz_array.device
+        )
+        mz_array = torch.concat((ghost_mz, mz_array), dim=1)
+        intensity_array = torch.concat(
+            (ghost_intensity, intensity_array), dim=1
+        )
+
         spectra = torch.stack([mz_array, intensity_array], dim=2)
         src_key_padding_mask = spectra.sum(dim=2) == 0
 
