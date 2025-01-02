@@ -101,6 +101,7 @@ class Spec2Pep(pl.LightningModule):
     def __init__(
         self,
         dim_model: int = 512,
+        dim_fourier: int = 488,
         n_head: int = 8,
         dim_feedforward: int = 1024,
         n_layers: int = 9,
@@ -136,7 +137,7 @@ class Spec2Pep(pl.LightningModule):
             dim_feedforward=dim_feedforward,
             n_layers=n_layers,
             dropout=dropout,
-            peak_encoder=FourierPeakEncoder(dim_model),
+            peak_encoder=FourierPeakEncoder(dim_model, dim_fourier),
         )
         self.decoder = PeptideDecoder(
             d_model=dim_model,

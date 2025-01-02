@@ -1,6 +1,5 @@
 """Transformer encoder and decoder for the de novo sequencing task."""
 
-import math
 from collections.abc import Callable
 from typing import Optional
 
@@ -69,14 +68,21 @@ class FourierPeakEncoder(torch.nn.Module):
     def __init__(
         self,
         d_model: int,
+        d_fourier: int,
         m_max: Optional[float] = 1000,
         m_min: Optional[float] = 0.0002,
     ) -> None:
         super().__init__()
-        fourier_encoder_dim = math.ceil(d_model / 2)
-        mz_int_dim = d_model - fourier_encoder_dim
+
+        if d_fourier >= d_model:
+            raise ValueError(
+                f"Fourier Dimension ({d_fourier}) must be smaller"
+                f" than embedding dimension ({d_model})"
+            )
+
+        mz_int_dim = d_model - d_fourier
         self.fourier_mz_encoder = FourierFeatureEncoder(
-            fourier_encoder_dim, m_max=m_max, m_min=m_min
+            d_out=d_fourier, m_max=m_max, m_min=m_min
         )
         self.mz_int_proj = torch.nn.Linear(2, mz_int_dim)
 
@@ -100,10 +106,9 @@ class FourierPeakEncoder(torch.nn.Module):
             The encoded features for the mass spectra.
 
         """
-        return torch.cat(
-            (self.fourier_mz_encoder(X[:, :, 0]), self.mz_int_proj(X)),
-            dim=-1,
-        )
+        fourier_features = self.fourier_mz_encoder(X[:, :, 0])
+        mz_linear_encoding = self.mz_int_proj(X)
+        return torch.cat((fourier_features, mz_linear_encoding), dim=-1)
 
 
 class PeptideDecoder(AnalyteTransformerDecoder):

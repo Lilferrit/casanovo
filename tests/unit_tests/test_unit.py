@@ -1732,6 +1732,7 @@ def test_fourier_peak_encoding():
     m_max = 2
     m_min = 0.5
     d_out = 2
+    d_fourier = 2
 
     encoder = FourierFeatureEncoder(d_out, m_max, m_min)
     assert encoder.frequencies.shape == (1, 1, 4)
@@ -1764,7 +1765,7 @@ def test_fourier_peak_encoding():
     actual_output = encoder(input_data)
     assert torch.allclose(expected_output, actual_output)
 
-    peak_encoder = FourierPeakEncoder(d_out * 2, m_max, m_min)
+    peak_encoder = FourierPeakEncoder(d_out * 2, d_fourier, m_max, m_min)
     assert peak_encoder.fourier_mz_encoder.frequencies.shape == (1, 1, 4)
     assert peak_encoder.mz_int_proj.in_features == 2
     assert peak_encoder.mz_int_proj.out_features == 2
