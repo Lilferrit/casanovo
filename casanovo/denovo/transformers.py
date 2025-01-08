@@ -238,7 +238,7 @@ class NeutralLossSpectrumEncoder(SpectrumTransformerEncoder):
 
         Returns
         -------
-        latent : torch.Tensor of shape (n_spectra, n_peaks + 1, d_model)
+        latent : torch.Tensor of shape (n_spectra, 2 * n_peaks + 1, d_model)
             The latent representations for the spectrum and each of its
             peaks.
         mem_mask : torch.Tensor
@@ -278,8 +278,10 @@ class NeutralLossSpectrumEncoder(SpectrumTransformerEncoder):
         combined_peaks = torch.cat([normal_peaks, nl_peaks], dim=1)
         latent_spectra = self.global_token_hook(
             *args,
-            mz_array=mz_array,
-            intensity_array=intensity_array,
+            mz_array=torch.cat((mz_array, nl_mz_array), dim=1),
+            intensity_array=torch.cat(
+                (intensity_array, intensity_array), dim=1
+            ),
             **kwargs,
         )
         combined_peaks = torch.cat(
