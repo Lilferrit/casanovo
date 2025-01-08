@@ -189,7 +189,6 @@ class NeutralLossSpectrumEncoder(SpectrumTransformerEncoder):
         n_layers: int = 1,
         dropout: float = 0.0,
         peak_encoder: PeakEncoder | Callable | bool = True,
-        neutral_loss_encoder: PeakEncoder | Callable | bool = True,
     ) -> None:
         super().__init__(
             d_model=d_model,
@@ -199,13 +198,6 @@ class NeutralLossSpectrumEncoder(SpectrumTransformerEncoder):
             dropout=dropout,
             peak_encoder=peak_encoder,
         )
-
-        if callable(neutral_loss_encoder):
-            self.neutral_loss_encoder = neutral_loss_encoder
-        elif neutral_loss_encoder:
-            self.neutral_loss_encoder = PeakEncoder(self.d_model)
-        else:
-            self.neutral_loss_encoder = torch.nn.Linear(2, self.d_model)
 
     def forward(
         self,
@@ -250,10 +242,6 @@ class NeutralLossSpectrumEncoder(SpectrumTransformerEncoder):
 
         # src_key_padding mask will be the same for both neutral loss and
         # normal spectra
-        src_key_padding_mask = torch.cat(
-            (src_key_padding_mask, src_key_padding_mask), dim=1
-        )
-
         global_token_mask = torch.zeros(
             (src_key_padding_mask.shape[0], 1),
             dtype=src_key_padding_mask.dtype,
@@ -267,29 +255,20 @@ class NeutralLossSpectrumEncoder(SpectrumTransformerEncoder):
         # Compute neutral loss spectrum assuming assumes [M+H]x  ions
         # a la Bittremieux et al.
         nl_mz_array = (precursor_mass[:, None] + self.ADDUCT_MASS) - mz_array
-
-        normal_peaks = self.peak_encoder(
-            torch.stack([mz_array, intensity_array], dim=2)
-        )
-        nl_peaks = self.neutral_loss_encoder(
+        nl_peaks = self.peak_encoder(
             torch.stack([nl_mz_array, intensity_array], dim=2)
         )
 
-        combined_peaks = torch.cat([normal_peaks, nl_peaks], dim=1)
         latent_spectra = self.global_token_hook(
             *args,
-            mz_array=torch.cat((mz_array, nl_mz_array), dim=1),
-            intensity_array=torch.cat(
-                (intensity_array, intensity_array), dim=1
-            ),
+            mz_array=nl_mz_array,
+            intensity_array=intensity_array,
             **kwargs,
         )
-        combined_peaks = torch.cat(
-            [latent_spectra[:, None, :], combined_peaks], dim=1
-        )
+        nl_peaks = torch.cat([latent_spectra[:, None, :], nl_peaks], dim=1)
 
         out = self.transformer_encoder(
-            combined_peaks,
+            nl_peaks,
             mask=mask,
             src_key_padding_mask=src_key_padding_mask,
         )
