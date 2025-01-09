@@ -247,9 +247,8 @@ class Spec2Pep(pl.LightningModule):
         mzs, ints, precursors, _, _ = self._process_batch(batch)
         memories, mem_masks = self.encoder(mzs, ints)
 
-        forward_predictions = self.beam_search_decode(
-            mzs, memories, mem_masks, precursors, self.forward_decoder
-        )
+        # FIXME: Disabled forward decoder
+        forward_predictions = dict()
         with temporary_reverse(self.tokenizer):
             reverse_predictions = self.beam_search_decode(
                 mzs, memories, mem_masks, precursors, self.reverse_decoder
