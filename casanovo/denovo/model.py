@@ -251,9 +251,8 @@ class Spec2Pep(pl.LightningModule):
             mzs, memories, mem_masks, precursors, self.forward_decoder
         )
         with temporary_reverse(self.tokenizer):
-            reverse_predictions = self.beam_search_decode(
-                mzs, memories, mem_masks, precursors, self.reverse_decoder
-            )
+            # FIXME: reverse decoder disabled
+            reverse_predictions = dict()
 
         # Merge prediction queues
         for (
