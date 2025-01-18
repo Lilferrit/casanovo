@@ -1086,9 +1086,8 @@ class Spec2Pep(pl.LightningModule):
         lr = self.opt_kwargs["lr"]
         optimizer = torch.optim.Adam(
             [
-                {"params": self.encoder.parameters(), "lr": lr / 2},
-                {"params": self.forward_decoder.parameters(), "lr": lr},
-                {"params": self.reverse_decoder.parameters(), "lr": lr},
+                {"params": self.encoder.parameters(), "lr": lr},
+                {"params": self.decoder.parameters(), "lr": lr / 2},
             ],
             **self.opt_kwargs,
         )
