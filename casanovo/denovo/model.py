@@ -855,17 +855,6 @@ class Spec2Pep(pl.LightningModule):
             batch_size=pred.shape[0],
         )
 
-        if torch.cuda.is_available():
-            free_mem, _ = torch.cuda.mem_get_info()
-            self.log(
-                "CUDA Mem Remaining",
-                free_mem,
-                on_step=False,
-                on_epoch=True,
-                sync_dist=True,
-                batch_size=pred.shape[0],
-            )
-
         return loss
 
     def validation_step(
