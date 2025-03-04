@@ -15,7 +15,11 @@ import torch
 import torch.utils.data
 from depthcharge.tokenizers import PeptideTokenizer
 from depthcharge.tokenizers.peptides import MskbPeptideTokenizer
-from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
+from lightning.pytorch.callbacks import (
+    LearningRateMonitor,
+    ModelCheckpoint,
+    ThroughputMonitor,
+)
 from lightning.pytorch.strategies import DDPStrategy
 from torch.utils.data import DataLoader
 
@@ -108,6 +112,11 @@ class ModelRunner:
                 enable_version_counter=False,
             ),
         ]
+
+        if self.config.throughput_monitor:
+            self.callbacks.append(
+                ThroughputMonitor(lambda batch: len(batch["peak_file"]))
+            )
 
     def __enter__(self):
         """Enter the context manager"""
@@ -345,6 +354,7 @@ class ModelRunner:
             else:
                 devices = self.config.devices
 
+        if train or self.config.throughput_monitor:
             # Configure loggers
             logger = False
             if self.config.log_metrics or self.config.tb_summarywriter:
@@ -388,7 +398,7 @@ class ModelRunner:
                             )
                         )
 
-                    if len(logger) > 0:
+                    if len(logger) > 0 and train:
                         self.callbacks.append(
                             LearningRateMonitor(
                                 log_momentum=True, log_weight_decay=True

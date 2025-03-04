@@ -281,6 +281,7 @@ def get_config_file(file_path, file_name, additional_cfg=None):
         "n_log": 1,
         "tb_summarywriter": False,
         "log_metrics": False,
+        "throughput_monitor": False,
         "log_every_n_steps": 50,
         "n_peaks": 150,
         "min_mz": 50.0,
