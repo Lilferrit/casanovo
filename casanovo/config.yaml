@@ -86,6 +86,8 @@ log_metrics: false
 log_every_n_steps: 50
 # Model validation and checkpointing frequency in training steps.
 val_check_interval: 50_000
+# Whether to monitor throughput
+throughput_monitor: false
 
 # SPECTRUM PROCESSING OPTIONS
 # Number of the most intense peaks to retain, any remaining peaks are discarded.

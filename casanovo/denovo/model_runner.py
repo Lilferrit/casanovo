@@ -16,6 +16,11 @@ import lightning.pytorch.loggers
 import numpy as np
 import torch
 from depthcharge.data import AnnotatedSpectrumIndex, SpectrumIndex
+from lightning.pytorch.callbacks import (
+    LearningRateMonitor,
+    ModelCheckpoint,
+    ThroughputMonitor,
+)
 from lightning.pytorch.strategies import DDPStrategy
 from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
 
@@ -110,6 +115,11 @@ class ModelRunner:
             ),
             LearningRateMonitor(log_momentum=True, log_weight_decay=True),
         ]
+
+        if self.config.throughput_monitor:
+            self.callbacks.append(
+                ThroughputMonitor(lambda batch: len(batch[0]))
+            )
 
     def __enter__(self):
         """Enter the context manager"""
@@ -311,6 +321,58 @@ class ModelRunner:
             else:
                 devices = self.config.devices
 
+        if train or self.config.throughput_monitor:
+            # Configure loggers
+            if self.config.log_metrics or self.config.tb_summarywriter:
+                if not self.output_dir:
+                    logger.warning(
+                        "Output directory not set in model runner. "
+                        "No loss file or tensorboard will be created."
+                    )
+                else:
+                    log_list = []
+                    csv_log_dir = "csv_logs"
+                    tb_log_dir = "tensorboard"
+
+                    if self.config.log_metrics:
+                        if self.overwrite_ckpt_check:
+                            utils.check_dir_file_exists(
+                                self.output_dir,
+                                csv_log_dir,
+                            )
+
+                        log_list.append(
+                            lightning.pytorch.loggers.CSVLogger(
+                                self.output_dir,
+                                version=csv_log_dir,
+                                name=None,
+                            )
+                        )
+
+                    if self.config.tb_summarywriter:
+                        if self.overwrite_ckpt_check:
+                            utils.check_dir_file_exists(
+                                self.output_dir,
+                                tb_log_dir,
+                            )
+
+                        log_list.append(
+                            lightning.pytorch.loggers.TensorBoardLogger(
+                                self.output_dir,
+                                version=tb_log_dir,
+                                name=None,
+                            )
+                        )
+
+                    if len(log_list) > 0 and train:
+                        self.callbacks.append(
+                            LearningRateMonitor(
+                                log_momentum=True, log_weight_decay=True
+                            ),
+                        )
+
+                    trainer_cfg.update({"logger": log_list})
+
             additional_cfg = dict(
                 devices=devices,
                 callbacks=self.callbacks,
@@ -322,31 +384,6 @@ class ModelRunner:
                 check_val_every_n_epoch=None,
                 log_every_n_steps=self.config.log_every_n_steps,
             )
-
-            if self.config.log_metrics:
-                if not self.output_dir:
-                    logger.warning(
-                        "Output directory not set in model runner. "
-                        "No loss file will be created."
-                    )
-                else:
-                    csv_log_dir = "csv_logs"
-                    if self.overwrite_ckpt_check:
-                        utils.check_dir_file_exists(
-                            self.output_dir,
-                            csv_log_dir,
-                        )
-
-                    additional_cfg.update(
-                        {
-                            "logger": lightning.pytorch.loggers.CSVLogger(
-                                self.output_dir,
-                                version=csv_log_dir,
-                                name=None,
-                            ),
-                            "log_every_n_steps": self.config.log_every_n_steps,
-                        }
-                    )
 
             trainer_cfg.update(additional_cfg)
 
@@ -363,16 +400,6 @@ class ModelRunner:
         db_search : bool
             Determines whether to use the DB search model subclass.
         """
-        tb_summarywriter = None
-        if self.config.tb_summarywriter:
-            if self.output_dir is None:
-                logger.warning(
-                    "Can not create tensorboard because the output directory "
-                    "is not set in the model runner."
-                )
-            else:
-                tb_summarywriter = self.output_dir / "tensorboard"
-
         model_params = dict(
             dim_model=self.config.dim_model,
             n_head=self.config.n_head,
@@ -389,7 +416,6 @@ class ModelRunner:
             n_beams=self.config.n_beams,
             top_match=self.config.top_match,
             n_log=self.config.n_log,
-            tb_summarywriter=tb_summarywriter,
             train_label_smoothing=self.config.train_label_smoothing,
             warmup_iters=self.config.warmup_iters,
             cosine_schedule_period_iters=self.config.cosine_schedule_period_iters,
@@ -409,7 +435,6 @@ class ModelRunner:
             min_peptide_len=self.config.min_peptide_len,
             top_match=self.config.top_match,
             n_log=self.config.n_log,
-            tb_summarywriter=tb_summarywriter,
             train_label_smoothing=self.config.train_label_smoothing,
             warmup_iters=self.config.warmup_iters,
             cosine_schedule_period_iters=self.config.cosine_schedule_period_iters,

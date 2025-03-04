@@ -77,9 +77,6 @@ class Spec2Pep(pl.LightningModule, ModelMixin):
         Number of PSMs to return for each spectrum.
     n_log : int
         The number of epochs to wait between logging messages.
-    tb_summarywriter : Optional[Path]
-        Folder path to record performance metrics during training. If
-        ``None``, don't use a ``SummaryWriter``.
     train_label_smoothing : float
         Smoothing factor when calculating the training loss.
     warmup_iters : int
@@ -114,7 +111,6 @@ class Spec2Pep(pl.LightningModule, ModelMixin):
         n_beams: int = 1,
         top_match: int = 1,
         n_log: int = 10,
-        tb_summarywriter: Optional[Path] = None,
         train_label_smoothing: float = 0.01,
         warmup_iters: int = 100_000,
         cosine_schedule_period_iters: int = 600_000,
@@ -179,10 +175,6 @@ class Spec2Pep(pl.LightningModule, ModelMixin):
         self.calculate_precision = calculate_precision
         self.n_log = n_log
         self._history = []
-        if tb_summarywriter is not None:
-            self.tb_summarywriter = SummaryWriter(str(tb_summarywriter))
-        else:
-            self.tb_summarywriter = None
 
         # Output writer during predicting.
         self.out_writer: ms_io.MztabWriter = out_writer
@@ -943,18 +935,6 @@ class Spec2Pep(pl.LightningModule, ModelMixin):
                 ]
 
             logger.info(msg, *vals)
-            if self.tb_summarywriter is not None:
-                for descr, key in [
-                    ("loss/train_crossentropy_loss", "train"),
-                    ("loss/val_crossentropy_loss", "valid"),
-                    ("eval/val_pep_precision", "valid_pep_precision"),
-                    ("eval/val_aa_precision", "valid_aa_precision"),
-                ]:
-                    metric_value = metrics.get(key, np.nan)
-                    if not np.isnan(metric_value):
-                        self.tb_summarywriter.add_scalar(
-                            descr, metric_value, metrics["step"]
-                        )
 
     def configure_optimizers(
         self,
