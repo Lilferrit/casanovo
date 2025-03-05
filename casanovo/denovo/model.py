@@ -181,6 +181,12 @@ class Spec2Pep(pl.LightningModule):
         # Output writer during predicting.
         self.out_writer: ms_io.MztabWriter = out_writer
 
+        # Mass index (for evaluation)
+        self.aa_mass_dict = {
+            self.tokenizer.index[res]: mass
+            for res, mass in self.tokenizer.residues.items()
+        }
+
     @property
     def device(self) -> torch.device:
         """The current device for first parameter of the model."""
@@ -802,6 +808,49 @@ class Spec2Pep(pl.LightningModule):
         )
         return decoded, tokens
 
+    def _calc_loss(
+        self,
+        pred: torch.Tensor,
+        truth: torch.Tensor,
+        mode: str,
+    ) -> torch.Tensor:
+        """
+        Computes the loss for a given set of predictions and annotations.
+
+        Parameters
+        ----------
+        pred : torch.Tensor
+            The predicted logits of shape
+            (batch_size, sequence_length, vocab_size)
+        truth : torch.Tensor
+            The ground-truth labels of shape (batch_size, sequence_length),
+            representing token indices.
+        mode : str
+            The current phase of training (e.g., "train" or "validation"
+
+        Returns
+        -------
+        torch.Tensor
+            The computed loss for the given predictions and labels.
+        """
+        pred = pred[:, :-1, :].reshape(-1, self.vocab_size)
+
+        if mode == "train":
+            loss = self.celoss(pred, truth.flatten())
+        else:
+            loss = self.val_celoss(pred, truth.flatten())
+
+        self.log(
+            f"{mode}_CELoss",
+            loss.detach(),
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True,
+            batch_size=pred.shape[0],
+        )
+
+        return loss
+
     def training_step(
         self,
         batch: dict,
@@ -827,21 +876,7 @@ class Spec2Pep(pl.LightningModule):
             The loss of the training step.
         """
         pred, truth = self._forward_step(batch)
-        pred = pred[:, :-1, :].reshape(-1, self.vocab_size)
-
-        if mode == "train":
-            loss = self.celoss(pred, truth.flatten())
-        else:
-            loss = self.val_celoss(pred, truth.flatten())
-        self.log(
-            f"{mode}_CELoss",
-            loss.detach(),
-            on_step=False,
-            on_epoch=True,
-            sync_dist=True,
-            batch_size=pred.shape[0],
-        )
-        return loss
+        return self._calc_loss(pred, truth, mode)
 
     def validation_step(
         self, batch: Tuple[torch.Tensor, torch.Tensor, List[str]], *args
@@ -862,32 +897,26 @@ class Spec2Pep(pl.LightningModule):
         torch.Tensor
             The loss of the validation step.
         """
+        pred, truth = self._forward_step(batch)
+
         # Record the loss.
-        loss = self.training_step(batch, mode="valid")
+        loss = self._calc_loss(pred, truth, "valid")
         if not self.calculate_precision:
             return loss
 
         # Calculate and log amino acid and peptide match evaluation metrics from
         # the predicted peptides.
-        peptides_true = [
-            "".join(p)
-            for p in self.tokenizer.detokenize(batch["seq"], join=False)
-        ]
-        peptides_pred = []
-        for spectrum_preds in self.forward(batch):
-            for _, _, pred in spectrum_preds:
-                peptides_pred.append(pred)
-        peptides_pred = [
-            "".join(p)
-            for p in self.tokenizer.detokenize(peptides_pred, join=False)
-        ]
-        batch_size = len(peptides_true)
+        print(self.aa_mass_dict)
+        peptides_pred = (
+            torch.argmax(pred[:, :-1, :], dim=-1).cpu().detach().numpy()
+        )
+        truth = truth.cpu().detach().numpy()
+        batch_size = len(pred)
+        aa_matches_batch, n_aa, _ = evaluate.aa_match_batch(
+            truth, peptides_pred, self.aa_mass_dict, mode="aligned"
+        )
         aa_precision, _, pep_precision = evaluate.aa_match_metrics(
-            *evaluate.aa_match_batch(
-                peptides_true,
-                peptides_pred,
-                self.tokenizer.residues,
-            )
+            aa_matches_batch, n_aa, n_aa
         )
 
         log_args = dict(on_step=False, on_epoch=True, sync_dist=True)
@@ -897,7 +926,42 @@ class Spec2Pep(pl.LightningModule):
         self.log(
             "aa_precision", aa_precision, **log_args, batch_size=batch_size
         )
-        return loss
+
+        aa_scores_all = torch.nn.functional.softmax(pred, dim=-1)
+        aa_scores_all = torch.max(aa_scores_all, dim=-1)
+        _, _, precursors, _ = self._process_batch(batch)
+        prec_charges = precursors[:, 1].cpu().detach().numpy()
+        prec_mzs = precursors[:, 2].cpu().detach().numpy()
+        predictions = []
+
+        for (
+            precursor_charge,
+            precursor_mz,
+            scan,
+            file_name,
+            peptide,
+            aa_scores,
+        ) in zip(
+            prec_charges,
+            prec_mzs,
+            batch["scan_id"],
+            batch["peak_file"],
+            peptides_pred,
+            aa_scores_all,
+        ):
+            predictions.append(
+                (
+                    scan,
+                    precursor_charge,
+                    precursor_mz,
+                    peptide,
+                    float("nan"),
+                    aa_scores,
+                    file_name,
+                )
+            )
+
+        return loss, predictions
 
     def predict_step(
         self, batch: Tuple[torch.Tensor, torch.Tensor, torch.Tensor], *args
