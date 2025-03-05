@@ -1093,6 +1093,11 @@ class Spec2Pep(pl.LightningModule):
                 )
             )
 
+    def on_validation_batch_end(
+        self, outputs: Tuple[torch.Tensor, List[ms_io.PepSpecMatch]], *args
+    ):
+        self.on_predict_batch_end(outputs[0])
+
     def on_train_start(self):
         """Log optimizer settings."""
         self.log("hp/optimizer_warmup_iters", self.warmup_iters)
