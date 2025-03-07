@@ -907,13 +907,28 @@ class Spec2Pep(pl.LightningModule):
         # Calculate and log amino acid and peptide match evaluation metrics from
         # the predicted peptides.
         print(self.aa_mass_dict)
-        peptides_pred = (
+        tokens_pred = (
             torch.argmax(pred[:, :-1, :], dim=-1).cpu().detach().numpy()
         )
-        truth = truth.cpu().detach().numpy()
         batch_size = len(pred)
+
+        zero_mask = truth == 0
+        indices = torch.where(
+            zero_mask, torch.arange(truth.shape[1]), truth.shape[1]
+        )
+        first_zero_idx = torch.min(indices, dim=1).values
+
+        peptides_pred = [
+            curr_tokens_pred[:idx]
+            for curr_tokens_pred, idx in zip(tokens_pred, first_zero_idx)
+        ]
+        peptides_truth = [
+            curr_tokens_truth[:idx]
+            for curr_tokens_truth, idx in zip(truth, first_zero_idx)
+        ]
+
         aa_matches_batch, n_aa, _ = evaluate.aa_match_batch(
-            truth, peptides_pred, self.aa_mass_dict, mode="aligned"
+            peptides_truth, peptides_pred, self.aa_mass_dict, mode="aligned"
         )
         aa_precision, _, pep_precision = evaluate.aa_match_metrics(
             aa_matches_batch, n_aa, n_aa
@@ -961,7 +976,8 @@ class Spec2Pep(pl.LightningModule):
                 )
             )
 
-        return loss, predictions
+        self.on_predict_batch_end(predictions)
+        return loss
 
     def predict_step(
         self, batch: Tuple[torch.Tensor, torch.Tensor, torch.Tensor], *args
@@ -1092,11 +1108,6 @@ class Spec2Pep(pl.LightningModule):
                     aa_scores=aa_scores,
                 )
             )
-
-    def on_validation_batch_end(
-        self, outputs: Tuple[torch.Tensor, List[ms_io.PepSpecMatch]], *args
-    ):
-        self.on_predict_batch_end(outputs[0])
 
     def on_train_start(self):
         """Log optimizer settings."""

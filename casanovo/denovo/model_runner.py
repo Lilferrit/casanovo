@@ -201,7 +201,60 @@ class ModelRunner:
             self.loaders.val_dataloader(),
         )
 
-    def log_metrics(self, test_dataloader: DataLoader) -> None:
+    def dump_psms(
+        self,
+        seq_pred: List[List[int] | None],
+        seq_true: List[List[int] | None],
+        psm_pred: List[float],
+    ) -> None:
+        """
+        Save predicted and true psms to CSV file
+
+        Parameters
+        ----------
+        seq_pred : List[List[int] | None]
+            A list of predicted sequences represented as a list of tokens
+        seq_true : List[List[int] | None]
+            A list of ground truth sequences represented as a list of tokens
+        pred_conf : List[float]
+            A list of prediction confidence scores (database search scores)
+            for each psm
+        """
+
+        def detokenize_helper(sequence: List[List[int] | None]) -> List[str]:
+            return [
+                (
+                    ""
+                    if seq is None
+                    else "".join(
+                        self.model.tokenizer.detokenize([seq], join=False)[0]
+                    )
+                )
+                for seq in sequence
+            ]
+
+        seq_pred = detokenize_helper(seq_pred)
+        seq_true = detokenize_helper(seq_true)
+        file_prefix = (
+            "" if self.output_rootname is None else self.output_rootname + "."
+        )
+        with open(
+            self.output_dir / (file_prefix + "psms.csv"), mode="w", newline=""
+        ) as file:
+            writer = csv.writer(file)
+            writer.writerow(
+                [
+                    "Ground Truth Peptide",
+                    "Predicted Peptide",
+                    "Prediction Confidence",
+                ]
+            )
+            for true_seq, pred_seq, conf in zip(seq_true, seq_pred, pred_conf):
+                writer.writerow([true_seq, pred_seq, conf])
+
+    def log_metrics(
+        self, test_dataloader: DataLoader, mode: str = "sequence"
+    ) -> None:
         """Log peptide precision and amino acid precision
 
         Calculate and log peptide precision and amino acid precision
@@ -214,6 +267,7 @@ class ModelRunner:
             predictions
         """
         seq_pred = []
+        psm_pred = []
         seq_true = []
         pred_idx = 0
 
@@ -230,6 +284,7 @@ class ModelRunner:
                     and self.writer.psms[pred_idx].spectrum_id
                     == spectrum_id_true
                 ):
+                    psm_pred.append(self.writer.psms[pred_idx])
                     next_pred_tokens = self.model.tokenizer.tokenize(
                         self.writer.psms[pred_idx].sequence
                     ).squeeze(0)
@@ -237,6 +292,7 @@ class ModelRunner:
                     pred_idx += 1
                 else:
                     seq_pred.append(None)
+                    psm_pred.append(None)
 
         residue_dict = {
             pep_idx: self.model.tokenizer.residues[pep_str]
@@ -260,6 +316,9 @@ class ModelRunner:
         logger.info("Peptide Precision: %.2f%%", 100 * pep_precision)
         logger.info("Amino Acid Precision: %.2f%%", 100 * aa_precision)
         logger.info("Amino Acid Recall: %.2f%%", 100 * aa_recall)
+
+        if mode == "evaluate":
+            self.dump_psms(seq_pred, seq_true, psm_pred)
 
     def predict(
         self,
@@ -321,6 +380,26 @@ class ModelRunner:
 
         if evaluate:
             self.log_metrics(predict_dataloader)
+
+    def evaluate(self, peak_path: Iterable[str]) -> None:
+        """Evaluate peptide sequence preditions from a trained Casanovo model.
+
+        Parameters
+        ----------
+        peak_path : iterable of str
+            The path with MS data files for predicting peptide sequences.
+
+        Returns
+        -------
+        self
+        """
+        self.initialize_trainer(train=False)
+        self.initialize_model(train=False)
+
+        test_paths = self._get_input_paths(peak_path, True, "test")
+        self.initialize_data_module(test_paths=test_paths)
+        self.loaders.setup(stage="test", annotated=True)
+        self.trainer.validate(self.model, self.loaders.test_dataloader())
 
     def initialize_trainer(self, train: bool) -> None:
         """Initialize the lightning Trainer.

@@ -202,6 +202,38 @@ def sequence(
 
 @main.command(cls=_SharedParams)
 @click.argument(
+    "annotated_peak_path",
+    required=True,
+    nargs=-1,
+    type=click.Path(exists=True, dir_okay=False),
+)
+def evaluate(
+    annotated_peak_path: Tuple[str],
+    model: Optional[str],
+    config: Optional[str],
+    output: Optional[str],
+    verbosity: str,
+) -> None:
+    """Evaluate de novo peptide sequencing performance.
+
+    ANNOTATED_PEAK_PATH must be one or more annotated MGF files,
+    such as those provided by MassIVE-KB.
+    """
+    output = setup_logging(output, verbosity)
+    config, model = setup_model(model, config, output, False)
+    start_time = time.time()
+
+    with ModelRunner(config, model) as runner:
+        logger.info("Sequencing and evaluating peptides from:")
+        for peak_file in annotated_peak_path:
+            logger.info("  %s", peak_file)
+
+        runner.evaluate(annotated_peak_path)
+        utils.log_run_report(start_time=start_time, end_time=time.time())
+
+
+@main.command(cls=_SharedParams)
+@click.argument(
     "peak_path",
     required=True,
     nargs=-1,
