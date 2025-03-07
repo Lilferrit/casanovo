@@ -290,6 +290,28 @@ class ModelRunner:
         if evaluate:
             self.log_metrics(test_index)
 
+    def evaluate(self, peak_path: Iterable[str], results_path: str) -> None:
+        """Evaluate peptide sequence preditions from a trained Casanovo model.
+
+        Parameters
+        ----------
+        peak_path : iterable of str
+            The path with MS data files for predicting peptide sequences.
+
+        Returns
+        -------
+        self
+        """
+        self.writer = ms_io.MztabWriter(results_path)
+        self.initialize_trainer(train=False)
+        self.initialize_model(train=False)
+
+        test_index = self._get_index(peak_path, True, "evaluation")
+        self.initialize_data_module(test_index=test_index)
+        self.loaders.setup(stage="test", annotated=True)
+
+        self.trainer.validate(self.model, self.loaders.test_dataloader())
+
     def initialize_trainer(self, train: bool) -> None:
         """Initialize the lightning Trainer.
 
