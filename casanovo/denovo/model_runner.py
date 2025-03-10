@@ -1,6 +1,7 @@
 """Training and testing functionality for the de novo peptide sequencing
 model."""
 
+import csv
 import glob
 import logging
 import os
@@ -200,6 +201,50 @@ class ModelRunner:
             self.loaders.val_dataloader(),
         )
 
+    def dump_psms(
+        self,
+        seq_pred: List[List[int] | None],
+        seq_true: List[List[int] | None],
+        aa_scores: List[List[float] | None],
+    ) -> None:
+        """
+        Save predicted and true psms to CSV file
+
+        Parameters
+        ----------
+        seq_pred : List[List[int] | None]
+            A list of predicted sequences represented as a list of tokens
+        seq_true : List[List[int] | None]
+            A list of ground truth sequences represented as a list of tokens
+        pred_conf : List[float]
+            A list of prediction confidence scores (database search scores)
+            for each psm
+        """
+        file_prefix = (
+            "" if self.output_rootname is None else self.output_rootname + "."
+        )
+        with open(
+            self.output_dir / (file_prefix + "psms.csv"), mode="w", newline=""
+        ) as file:
+            writer = csv.writer(file)
+            writer.writerow(
+                [
+                    "Ground Truth Peptide",
+                    "Predicted Peptide",
+                    "Amino Acid Scores",
+                ]
+            )
+            for true_seq, pred_seq, curr_aa_scores in zip(
+                seq_true, seq_pred, aa_scores
+            ):
+                writer.writerow(
+                    [
+                        true_seq,
+                        pred_seq,
+                        ";".join(str(aa) for aa in curr_aa_scores),
+                    ]
+                )
+
     def log_metrics(self, test_index: AnnotatedSpectrumIndex) -> None:
         """Log peptide precision and amino acid precision.
 
@@ -214,6 +259,7 @@ class ModelRunner:
         """
         seq_pred = []
         seq_true = []
+        aa_scores = []
         pred_idx = 0
 
         with test_index as t_ind:
@@ -223,9 +269,11 @@ class ModelRunner:
                     pred_idx
                 ].spectrum_id == t_ind.get_spectrum_id(true_idx):
                     seq_pred.append(self.writer.psms[pred_idx].sequence)
+                    aa_scores.append(self.writer.psms[pred_idx].aa_scores)
                     pred_idx += 1
                 else:
                     seq_pred.append(None)
+                    aa_scores.append(None)
 
         aa_precision, aa_recall, pep_precision = aa_match_metrics(
             *aa_match_batch(
@@ -303,14 +351,23 @@ class ModelRunner:
         self
         """
         self.writer = ms_io.MztabWriter(results_path)
+        self.writer.set_metadata(
+            self.config,
+            model=str(self.model_filename),
+            config_filename=self.config.file,
+        )
         self.initialize_trainer(train=False)
         self.initialize_model(train=False)
+        self.model.out_writer = self.writer
+        self.model.calculate_precision = True
 
         test_index = self._get_index(peak_path, True, "evaluation")
+        self.writer.set_ms_run([""])
         self.initialize_data_module(test_index=test_index)
         self.loaders.setup(stage="test", annotated=True)
-
         self.trainer.validate(self.model, self.loaders.test_dataloader())
+
+        self.log_metrics(test_index)
 
     def initialize_trainer(self, train: bool) -> None:
         """Initialize the lightning Trainer.

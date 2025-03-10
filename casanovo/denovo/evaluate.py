@@ -126,6 +126,50 @@ def aa_match_prefix_suffix(
     return aa_matches, aa_matches.all()
 
 
+def aa_match_aligned(
+    peptide1: List[str],
+    peptide2: List[str],
+    aa_dict: Dict[str, float],
+    cum_mass_threshold: float = 0.5,
+    ind_mass_threshold: float = 0.1,
+) -> Tuple[np.ndarray, bool]:
+    """
+    Find the matching amino acids between two sequences of the same length
+
+    Parameters
+    ----------
+    peptide1 : np.ndarray
+        The first tokenized peptide sequence to be compared.
+    peptide2 : np.ndarray
+        The second tokenized peptide sequence to be compared.
+    aa_dict : Dict[str, float]
+        Mapping of amino acid tokens to their mass values.
+    cum_mass_threshold : float
+        Mass threshold in Dalton to accept cumulative mass-matching amino acid
+        sequences.
+    ind_mass_threshold : float
+        Mass threshold in Dalton to accept individual mass-matching amino acids.
+
+    Returns
+    -------
+    aa_matches : np.ndarray of length max(len(peptide1), len(peptide2))
+        Boolean flag indicating whether each paired-up amino acid matches across
+        both peptide sequences.
+    pep_match : bool
+        Boolean flag to indicate whether the two peptide sequences fully match.
+    """
+    if len(peptide1) != len(peptide2):
+        raise ValueError("Peptides must be same length to use matched aligned")
+
+    aa_mass_one = np.array([aa_dict.get(aa, 0.0) for aa in peptide1])
+    aa_mass_two = np.array([aa_dict.get(aa, 0.0) for aa in peptide2])
+    abs_mass_diff = np.abs(aa_mass_one - aa_mass_two)
+    aa_matches = abs_mass_diff < ind_mass_threshold
+    pep_match = all(aa_matches)
+
+    return aa_matches, pep_match
+
+
 def aa_match(
     peptide1: List[str] | None,
     peptide2: List[str] | None,
@@ -183,6 +227,10 @@ def aa_match(
             ind_mass_threshold,
         )
         return aa_matches[::-1], pep_match
+    elif mode == "aligned":
+        return aa_match_aligned(
+            peptide1, peptide2, aa_dict, cum_mass_threshold, ind_mass_threshold
+        )
     else:
         raise ValueError("Unknown evaluation mode")
 

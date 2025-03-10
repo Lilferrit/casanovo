@@ -744,6 +744,49 @@ class Spec2Pep(pl.LightningModule, ModelMixin):
         """
         return self.decoder(sequences, precursors, *self.encoder(spectra))
 
+    def _calc_loss(
+        self,
+        pred: torch.Tensor,
+        truth: torch.Tensor,
+        mode: str,
+    ) -> torch.Tensor:
+        """
+        Computes the loss for a given set of predictions and annotations.
+
+        Parameters
+        ----------
+        pred : torch.Tensor
+            The predicted logits of shape
+            (batch_size, sequence_length, vocab_size)
+        truth : torch.Tensor
+            The ground-truth labels of shape (batch_size, sequence_length),
+            representing token indices.
+        mode : str
+            The current phase of training (e.g., "train" or "validation"
+
+        Returns
+        -------
+        torch.Tensor
+            The computed loss for the given predictions and labels.
+        """
+        pred = pred[:, :-1, :].reshape(-1, self.decoder.vocab_size + 1)
+
+        if mode == "train":
+            loss = self.celoss(pred, truth.flatten())
+        else:
+            loss = self.val_celoss(pred, truth.flatten())
+
+        self.log(
+            f"{mode}_CELoss",
+            loss.detach(),
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True,
+            batch_size=pred.shape[0],
+        )
+
+        return loss
+
     def training_step(
         self,
         batch: Tuple[torch.Tensor, torch.Tensor, List[str]],
@@ -767,19 +810,7 @@ class Spec2Pep(pl.LightningModule, ModelMixin):
             The loss of the training step.
         """
         pred, truth = self._forward_step(*batch)
-        pred = pred[:, :-1, :].reshape(-1, self.decoder.vocab_size + 1)
-        if mode == "train":
-            loss = self.celoss(pred, truth.flatten())
-        else:
-            loss = self.val_celoss(pred, truth.flatten())
-        self.log(
-            f"{mode}_CELoss",
-            loss.detach(),
-            on_step=False,
-            on_epoch=True,
-            sync_dist=True,
-        )
-        return loss
+        return self._calc_loss(pred, truth, mode)
 
     def validation_step(
         self, batch: Tuple[torch.Tensor, torch.Tensor, List[str]], *args
@@ -789,35 +820,112 @@ class Spec2Pep(pl.LightningModule, ModelMixin):
 
         Parameters
         ----------
-        batch : Tuple[torch.Tensor, torch.Tensor, List[str]]
-            A batch of (i) MS/MS spectra, (ii) precursor information,
-            (iii) peptide sequences.
+        batch : Tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[str]]
+            A batch of (i) m/z values of MS/MS spectra,
+            (ii) intensity values of MS/MS spectra,
+            (iii) precursor information,
+            (iv) peptide sequences as torch Tensors.
 
         Returns
         -------
         torch.Tensor
             The loss of the validation step.
         """
+        pred, truth = self._forward_step(*batch)
+
         # Record the loss.
-        loss = self.training_step(batch, mode="valid")
+        loss = self._calc_loss(pred, truth, "valid")
         if not self.calculate_precision:
             return loss
 
-        # Calculate and log amino acid and peptide match evaluation
-        # metrics from the predicted peptides.
-        peptides_pred, peptides_true = [], batch[2]
-        for spectrum_preds in self.forward(batch[0], batch[1]):
-            for _, _, pred in spectrum_preds:
-                peptides_pred.append(pred)
-
-        aa_precision, _, pep_precision = evaluate.aa_match_metrics(
-            *evaluate.aa_match_batch(
-                peptides_true, peptides_pred, self.decoder._peptide_mass.masses
-            )
+        # Calculate and log amino acid and peptide match evaluation metrics from
+        # the predicted peptides.
+        tokens_pred = (
+            torch.argmax(pred[:, :-1, :], dim=-1).cpu().detach().numpy()
         )
+        batch_size = len(pred)
+
+        zero_mask = truth == 0
+        indices = torch.where(
+            zero_mask, torch.arange(truth.shape[1]), truth.shape[1]
+        )
+        first_zero_idx = torch.min(indices, dim=1).values
+
+        peptides_pred = [
+            curr_tokens_pred[:idx]
+            for curr_tokens_pred, idx in zip(tokens_pred, first_zero_idx)
+        ]
+        peptides_truth = [
+            curr_tokens_truth[:idx]
+            for curr_tokens_truth, idx in zip(truth, first_zero_idx)
+        ]
+
+        peptides_pred = [
+            "".join(self.decoder.detokenize(pep)) for pep in peptides_pred
+        ]
+        peptides_truth = [
+            "".join(self.decoder.detokenize(pep)) for pep in peptides_truth
+        ]
+
+        aa_matches_batch, n_aa, _ = evaluate.aa_match_batch(
+            peptides_truth,
+            peptides_pred,
+            self.decoder._peptide_mass.masses,
+            mode="aligned",
+        )
+        aa_precision, _, pep_precision = evaluate.aa_match_metrics(
+            aa_matches_batch, n_aa, n_aa
+        )
+
         log_args = dict(on_step=False, on_epoch=True, sync_dist=True)
-        self.log("Peptide precision at coverage=1", pep_precision, **log_args)
-        self.log("AA precision at coverage=1", aa_precision, **log_args)
+        self.log(
+            "pep_precision", pep_precision, **log_args, batch_size=batch_size
+        )
+        self.log(
+            "aa_precision", aa_precision, **log_args, batch_size=batch_size
+        )
+        self.log(
+            "Peptide precision at coverage=1",
+            pep_precision,
+            **log_args,
+        )
+        self.log(
+            "AA precision at coverage=1",
+            aa_precision,
+            **log_args,
+        )
+
+        aa_scores_all = torch.nn.functional.softmax(pred, dim=-1)
+        aa_scores_all, _ = torch.max(aa_scores_all, dim=-1)
+        predictions = []
+        print(aa_scores_all)
+
+        for (
+            precursor_charge,
+            precursor_mz,
+            spectrum_i,
+            peptide,
+            aa_scores,
+        ) in zip(
+            batch[1][:, 1].cpu().detach().numpy(),
+            batch[1][:, 2].cpu().detach().numpy(),
+            batch[2],
+            peptides_pred,
+            aa_scores_all,
+        ):
+            predictions.append(
+                ms_io.PepSpecMatch(
+                    sequence=peptide,
+                    spectrum_id=("", -1),
+                    peptide_score=float("NaN"),
+                    charge=int(precursor_charge),
+                    calc_mz=float("NaN"),
+                    exp_mz=precursor_mz,
+                    aa_scores=aa_scores.cpu().detach().numpy(),
+                )
+            )
+
+        self.on_predict_batch_end(predictions)
         return loss
 
     def predict_step(
