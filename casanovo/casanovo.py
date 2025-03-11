@@ -241,9 +241,10 @@ def evaluate(
         for peak_file in annotated_peak_path:
             logger.info("  %s", peak_file)
 
+        results_path = output_path / f"{output_root_name}.mztab"
         runner.evaluate(
             annotated_peak_path,
-            str((output_path / output_root_name).with_suffix(".mztab")),
+            str(results_path),
         )
         utils.log_run_report(start_time=start_time, end_time=time.time())
 
