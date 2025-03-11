@@ -907,7 +907,7 @@ class Spec2Pep(pl.LightningModule, ModelMixin):
             peptides_pred,
             aa_scores_all.cpu().detach().numpy(),
         ):
-            aa_scores = aa_scores[: len(peptide)]
+            aa_scores = aa_scores[: len(peptide) - 1]
             aa_scores = aa_scores[::-1] if self.decoder.reverse else aa_scores
             peptide = peptide[:-1]
             peptide = peptide[::-1] if self.decoder.reverse else peptide
