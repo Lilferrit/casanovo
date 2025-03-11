@@ -144,8 +144,6 @@ class MztabWriter:
             )
             self._run_map[filename] = i
 
-        print(self._run_map)
-
     def save(self) -> None:
         """
         Export the spectrum identifications to the mzTab file.

@@ -809,7 +809,9 @@ class Spec2Pep(pl.LightningModule, ModelMixin):
         torch.Tensor
             The loss of the training step.
         """
-        pred, truth = self._forward_step(*batch)
+        pred, truth = pred, truth = self._forward_step(
+            batch[0], batch[1], batch[3]
+        )
         return self._calc_loss(pred, truth, mode)
 
     def validation_step(
@@ -831,7 +833,7 @@ class Spec2Pep(pl.LightningModule, ModelMixin):
         torch.Tensor
             The loss of the validation step.
         """
-        pred, truth = self._forward_step(*batch)
+        pred, truth = self._forward_step(batch[0], batch[1], batch[3])
 
         # Record the loss.
         loss = self._calc_loss(pred, truth, "valid")
@@ -852,19 +854,12 @@ class Spec2Pep(pl.LightningModule, ModelMixin):
         first_zero_idx = torch.min(indices, dim=1).values
 
         peptides_pred = [
-            curr_tokens_pred[:idx]
-            for curr_tokens_pred, idx in zip(tokens_pred, first_zero_idx)
+            [self.decoder._idx2aa.get(aa, "$") for aa in pep[:idx]]
+            for pep, idx in zip(tokens_pred, first_zero_idx)
         ]
         peptides_truth = [
-            curr_tokens_truth[:idx]
-            for curr_tokens_truth, idx in zip(truth, first_zero_idx)
-        ]
-
-        peptides_pred = [
-            "".join(self.decoder.detokenize(pep)) for pep in peptides_pred
-        ]
-        peptides_truth = [
-            "".join(self.decoder.detokenize(pep)) for pep in peptides_truth
+            [self.decoder._idx2aa.get(aa, "$") for aa in pep[:idx]]
+            for pep, idx in zip(truth, first_zero_idx)
         ]
 
         aa_matches_batch, n_aa, _ = evaluate.aa_match_batch(
@@ -898,12 +893,11 @@ class Spec2Pep(pl.LightningModule, ModelMixin):
         aa_scores_all = torch.nn.functional.softmax(pred, dim=-1)
         aa_scores_all, _ = torch.max(aa_scores_all, dim=-1)
         predictions = []
-        print(aa_scores_all)
 
         for (
             precursor_charge,
             precursor_mz,
-            spectrum_i,
+            spectrum_id,
             peptide,
             aa_scores,
         ) in zip(
@@ -911,17 +905,23 @@ class Spec2Pep(pl.LightningModule, ModelMixin):
             batch[1][:, 2].cpu().detach().numpy(),
             batch[2],
             peptides_pred,
-            aa_scores_all,
+            aa_scores_all.cpu().detach().numpy(),
         ):
+            aa_scores = aa_scores[: len(peptide)]
+            aa_scores = aa_scores[::-1] if self.decoder.reverse else aa_scores
+            peptide = peptide[:-1]
+            peptide = peptide[::-1] if self.decoder.reverse else peptide
+            peptide = "".join(peptide)
+
             predictions.append(
                 ms_io.PepSpecMatch(
                     sequence=peptide,
-                    spectrum_id=("", -1),
+                    spectrum_id=tuple(spectrum_id),
                     peptide_score=float("NaN"),
                     charge=int(precursor_charge),
                     calc_mz=float("NaN"),
                     exp_mz=precursor_mz,
-                    aa_scores=aa_scores.cpu().detach().numpy(),
+                    aa_scores=aa_scores,
                 )
             )
 

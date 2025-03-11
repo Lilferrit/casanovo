@@ -223,8 +223,11 @@ class ModelRunner:
         file_prefix = (
             "" if self.output_rootname is None else self.output_rootname + "."
         )
+        output_dir = (
+            self.output_dir if self.output_dir is not None else Path.cwd()
+        )
         with open(
-            self.output_dir / (file_prefix + "psms.csv"), mode="w", newline=""
+            output_dir / (file_prefix + "psms.csv"), mode="w", newline=""
         ) as file:
             writer = csv.writer(file)
             writer.writerow(
@@ -237,11 +240,13 @@ class ModelRunner:
             for true_seq, pred_seq, curr_aa_scores in zip(
                 seq_true, seq_pred, aa_scores
             ):
+                if curr_aa_scores is not None:
+                    curr_aa_scores = ";".join(str(aa) for aa in curr_aa_scores)
                 writer.writerow(
                     [
                         true_seq,
                         pred_seq,
-                        ";".join(str(aa) for aa in curr_aa_scores),
+                        curr_aa_scores,
                     ]
                 )
 
@@ -293,6 +298,7 @@ class ModelRunner:
         logger.info("Peptide Precision: %.2f%%", 100 * pep_precision)
         logger.info("Amino Acid Precision: %.2f%%", 100 * aa_precision)
         logger.info("Amino Acid Recall: %.2f%%", 100 * aa_recall)
+        self.dump_psms(seq_pred, seq_true, aa_scores)
 
     def predict(
         self,
@@ -362,7 +368,7 @@ class ModelRunner:
         self.model.calculate_precision = True
 
         test_index = self._get_index(peak_path, True, "evaluation")
-        self.writer.set_ms_run([""])
+        self.writer.set_ms_run(test_index.ms_files)
         self.initialize_data_module(test_index=test_index)
         self.loaders.setup(stage="test", annotated=True)
         self.trainer.validate(self.model, self.loaders.test_dataloader())

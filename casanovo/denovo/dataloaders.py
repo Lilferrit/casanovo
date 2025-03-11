@@ -223,7 +223,14 @@ def prepare_batch(
         The spectrum identifiers (during de novo sequencing) or peptide
         sequences (during training).
     """
-    spectra, precursor_mzs, precursor_charges, spectrum_ids = list(zip(*batch))
+    (
+        spectra,
+        precursor_mzs,
+        precursor_charges,
+        spectrum_ids,
+        annotations,
+    ) = list(zip(*batch))
+    annotations = None if annotations is None else np.asarray(annotations)
     spectra = torch.nn.utils.rnn.pad_sequence(spectra, batch_first=True)
     precursor_mzs = torch.tensor(precursor_mzs)
     precursor_charges = torch.tensor(precursor_charges)
@@ -231,7 +238,7 @@ def prepare_batch(
     precursors = torch.vstack(
         [precursor_masses, precursor_charges, precursor_mzs]
     ).T.float()
-    return spectra, precursors, np.asarray(spectrum_ids)
+    return spectra, precursors, np.asarray(spectrum_ids), annotations
 
 
 def prepare_psm_batch(
@@ -268,7 +275,7 @@ def prepare_psm_batch(
     batch_peptides : np.ndarray
         The candidate peptides for each spectrum.
     """
-    spectra, precursors, spectrum_ids = prepare_batch(batch)
+    spectra, precursors, spectrum_ids, _ = prepare_batch(batch)
 
     batch_spectra = []
     batch_precursors = []
