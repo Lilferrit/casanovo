@@ -849,7 +849,9 @@ class Spec2Pep(pl.LightningModule, ModelMixin):
 
         zero_mask = truth == 0
         indices = torch.where(
-            zero_mask, torch.arange(truth.shape[1]), truth.shape[1]
+            zero_mask,
+            torch.arange(truth.shape[1], device=truth.device),
+            truth.shape[1],
         )
         first_zero_idx = torch.min(indices, dim=1).values
 
