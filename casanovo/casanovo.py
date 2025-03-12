@@ -236,7 +236,13 @@ def evaluate(
         model, config, output_path, output_root_name, False
     )
     start_time = time.time()
-    with ModelRunner(config, model) as runner:
+    with ModelRunner(
+        config,
+        model,
+        output_path,
+        output_root_name if output_root is not None else None,
+        False,
+    ) as runner:
         logger.info("Sequencing and evaluating peptides from:")
         for peak_file in annotated_peak_path:
             logger.info("  %s", peak_file)

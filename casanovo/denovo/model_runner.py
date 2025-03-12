@@ -21,6 +21,7 @@ from lightning.pytorch.strategies import DDPStrategy
 from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
 
 from .. import utils
+from ..data.psm import PepSpecMatch
 from ..config import Config
 from ..data import db_utils, ms_io
 from ..denovo.dataloaders import DeNovoDataModule
@@ -203,52 +204,70 @@ class ModelRunner:
 
     def dump_psms(
         self,
-        seq_pred: List[List[int] | None],
-        seq_true: List[List[int] | None],
-        aa_scores: List[List[float] | None],
+        seq_pred: List[PepSpecMatch | None],
+        seq_true: List[str],
     ) -> None:
         """
-        Save predicted and true psms to CSV file
+        Save predicted and true PSMs to CSV file
 
         Parameters
         ----------
-        seq_pred : List[List[int] | None]
-            A list of predicted sequences represented as a list of tokens
-        seq_true : List[List[int] | None]
-            A list of ground truth sequences represented as a list of tokens
-        pred_conf : List[float]
-            A list of prediction confidence scores (database search scores)
-            for each psm
+        seq_pred : List[PepSpecMatch | None]
+            A list of predicted peptide spectrum matches (PSMs)
+        seq_true : List[str]
+            A list of ground truth sequences
         """
         file_prefix = (
             "" if self.output_rootname is None else self.output_rootname + "."
         )
-        output_dir = (
-            self.output_dir if self.output_dir is not None else Path.cwd()
-        )
-        with open(
-            output_dir / (file_prefix + "psms.csv"), mode="w", newline=""
-        ) as file:
+        output_file = self.output_dir / (file_prefix + "psms.csv")
+
+        with open(output_file, mode="w", newline="") as file:
             writer = csv.writer(file)
-            writer.writerow(
-                [
-                    "Ground Truth Peptide",
-                    "Predicted Peptide",
-                    "Amino Acid Scores",
-                ]
-            )
-            for true_seq, pred_seq, curr_aa_scores in zip(
-                seq_true, seq_pred, aa_scores
-            ):
-                if curr_aa_scores is not None:
-                    curr_aa_scores = ";".join(str(aa) for aa in curr_aa_scores)
-                writer.writerow(
-                    [
-                        true_seq,
-                        pred_seq,
-                        curr_aa_scores,
-                    ]
-                )
+            column_names = [
+                "Ground Truth Peptide",
+                "Predicted Peptide",
+                "Spectrum File",
+                "Spectrum Index",
+                "Peptide Score",
+                "Charge",
+                "Calc m/z",
+                "Exp m/z",
+                "Amino Acid Scores",
+            ]
+            writer.writerow(column_names)
+
+            for true_seq, pred_seq in zip(seq_true, seq_pred):
+                if pred_seq is not None:
+                    aa_scores_str = None
+                    spectrum_file = None
+                    spectrum_idx = None
+
+                    if pred_seq.aa_scores is not None:
+                        aa_scores_str = ";".join(
+                            str(aa) for aa in pred_seq.aa_scores
+                        )
+
+                    if pred_seq.spectrum_id is not None:
+                        spectrum_file, spectrum_idx = pred_seq.spectrum_id
+
+                    writer.writerow(
+                        [
+                            true_seq,
+                            pred_seq.sequence,
+                            spectrum_file,
+                            spectrum_idx,
+                            pred_seq.peptide_score,
+                            pred_seq.charge,
+                            pred_seq.calc_mz,
+                            pred_seq.exp_mz,
+                            aa_scores_str,
+                        ]
+                    )
+                else:
+                    writer.writerow(
+                        [true_seq] + ["" for _ in range(len(column_names) - 1)]
+                    )
 
     def log_metrics(self, test_index: AnnotatedSpectrumIndex) -> None:
         """Log peptide precision and amino acid precision.
@@ -264,7 +283,7 @@ class ModelRunner:
         """
         seq_pred = []
         seq_true = []
-        aa_scores = []
+        psm_pred = []
         pred_idx = 0
 
         with test_index as t_ind:
@@ -274,11 +293,11 @@ class ModelRunner:
                     pred_idx
                 ].spectrum_id == t_ind.get_spectrum_id(true_idx):
                     seq_pred.append(self.writer.psms[pred_idx].sequence)
-                    aa_scores.append(self.writer.psms[pred_idx].aa_scores)
+                    psm_pred.append(self.writer.psms[pred_idx])
                     pred_idx += 1
                 else:
                     seq_pred.append(None)
-                    aa_scores.append(None)
+                    psm_pred.append(None)
 
         aa_precision, aa_recall, pep_precision = aa_match_metrics(
             *aa_match_batch(
@@ -298,7 +317,7 @@ class ModelRunner:
         logger.info("Peptide Precision: %.2f%%", 100 * pep_precision)
         logger.info("Amino Acid Precision: %.2f%%", 100 * aa_precision)
         logger.info("Amino Acid Recall: %.2f%%", 100 * aa_recall)
-        self.dump_psms(seq_pred, seq_true, aa_scores)
+        self.dump_psms(psm_pred, seq_true)
 
     def predict(
         self,

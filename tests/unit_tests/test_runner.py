@@ -215,7 +215,10 @@ def test_evaluate(
     # Test evaluation with annotated peak file
     result_file = tmp_path / "result.mztab"
     with ModelRunner(
-        config, model_filename=str(model_file), overwrite_ckpt_check=False
+        config,
+        model_filename=str(model_file),
+        overwrite_ckpt_check=False,
+        output_dir=tmp_path,
     ) as runner:
         runner.predict([mgf_small], result_file, evaluate=True)
 
@@ -230,19 +233,28 @@ def test_evaluate(
 
     with pytest.raises(FileNotFoundError):
         with ModelRunner(
-            config, model_filename=str(model_file), overwrite_ckpt_check=False
+            config,
+            model_filename=str(model_file),
+            overwrite_ckpt_check=False,
+            output_dir=tmp_path,
         ) as runner:
             runner.predict([mzml_small], result_file, evaluate=True)
 
     with pytest.raises(TypeError, match=exception_string):
         with ModelRunner(
-            config, model_filename=str(model_file), overwrite_ckpt_check=False
+            config,
+            model_filename=str(model_file),
+            overwrite_ckpt_check=False,
+            output_dir=tmp_path,
         ) as runner:
             runner.predict([mgf_small_unannotated], result_file, evaluate=True)
 
     with pytest.raises(TypeError, match=exception_string):
         with ModelRunner(
-            config, model_filename=str(model_file), overwrite_ckpt_check=False
+            config,
+            model_filename=str(model_file),
+            overwrite_ckpt_check=False,
+            output_dir=tmp_path,
         ) as runner:
             runner.predict(
                 [mgf_small_unannotated, mzml_small], result_file, evaluate=True
@@ -256,7 +268,10 @@ def test_evaluate(
     # Test mix of annotated an unannotated peak files
     with pytest.warns(RuntimeWarning):
         with ModelRunner(
-            config, model_filename=str(model_file), overwrite_ckpt_check=False
+            config,
+            model_filename=str(model_file),
+            overwrite_ckpt_check=False,
+            output_dir=tmp_path,
         ) as runner:
             runner.predict([mgf_small, mzml_small], result_file, evaluate=True)
 
@@ -265,7 +280,10 @@ def test_evaluate(
 
     with pytest.raises(TypeError, match=exception_string):
         with ModelRunner(
-            config, model_filename=str(model_file), overwrite_ckpt_check=False
+            config,
+            model_filename=str(model_file),
+            overwrite_ckpt_check=False,
+            output_dir=tmp_path,
         ) as runner:
             runner.predict(
                 [mgf_small, mgf_small_unannotated], result_file, evaluate=True
@@ -276,7 +294,10 @@ def test_evaluate(
 
     with pytest.raises(TypeError, match=exception_string):
         with ModelRunner(
-            config, model_filename=str(model_file), overwrite_ckpt_check=False
+            config,
+            model_filename=str(model_file),
+            overwrite_ckpt_check=False,
+            output_dir=tmp_path,
         ) as runner:
             runner.predict(
                 [mgf_small, mgf_small_unannotated, mzml_small],
@@ -325,7 +346,7 @@ def test_metrics_logging(tmp_path, mgf_small, tiny_config):
     assert csv_path.is_dir()
 
 
-def test_log_metrics(monkeypatch, tiny_config):
+def test_log_metrics(monkeypatch, tiny_config, tmp_path):
     def get_mock_index(psm_list):
         mock_test_index = unittest.mock.MagicMock()
         mock_test_index.__enter__.return_value = mock_test_index
@@ -355,7 +376,7 @@ def test_log_metrics(monkeypatch, tiny_config):
         mock_logger = unittest.mock.MagicMock()
         ctx.setattr("casanovo.denovo.model_runner.logger", mock_logger)
 
-        with ModelRunner(Config(tiny_config)) as runner:
+        with ModelRunner(Config(tiny_config), output_dir=tmp_path) as runner:
             runner.writer = unittest.mock.MagicMock()
 
             # Test 100% peptide precision
