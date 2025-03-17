@@ -349,12 +349,6 @@ class ModelRunner:
             logger=False,
         )
 
-        if train:
-            if self.config.devices is None:
-                devices = "auto"
-            else:
-                devices = self.config.devices
-
         if train or self.config.throughput_monitor:
             # Configure loggers
             logger = False
@@ -406,6 +400,9 @@ class ModelRunner:
                             ),
                         )
 
+            devices = (
+                "auto" if self.config.devices is None else self.config.devices
+            )
             additional_cfg = dict(
                 devices=devices,
                 callbacks=self.callbacks,
