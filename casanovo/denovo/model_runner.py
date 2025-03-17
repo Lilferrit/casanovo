@@ -19,12 +19,12 @@ from depthcharge.data import AnnotatedSpectrumIndex, SpectrumIndex
 from lightning.pytorch.callbacks import (
     LearningRateMonitor,
     ModelCheckpoint,
-    ThroughputMonitor,
 )
 from lightning.pytorch.strategies import DDPStrategy
 from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
 
 from .. import utils
+from .throughput import ThroughputMonitor
 from ..config import Config
 from ..data import db_utils, ms_io
 from ..denovo.dataloaders import DeNovoDataModule
