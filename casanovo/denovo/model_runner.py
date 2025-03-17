@@ -315,12 +315,6 @@ class ModelRunner:
             enable_checkpointing=False,
         )
 
-        if train:
-            if self.config.devices is None:
-                devices = "auto"
-            else:
-                devices = self.config.devices
-
         if train or self.config.throughput_monitor:
             # Configure loggers
             if self.config.log_metrics or self.config.tb_summarywriter:
@@ -373,6 +367,9 @@ class ModelRunner:
 
                     trainer_cfg.update({"logger": log_list})
 
+            devices = (
+                "auto" if self.config.devices is None else self.config.devices
+            )
             additional_cfg = dict(
                 devices=devices,
                 callbacks=self.callbacks,
