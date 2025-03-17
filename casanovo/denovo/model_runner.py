@@ -18,17 +18,18 @@ from depthcharge.tokenizers.peptides import MskbPeptideTokenizer
 from lightning.pytorch.callbacks import (
     LearningRateMonitor,
     ModelCheckpoint,
-    ThroughputMonitor,
 )
 from lightning.pytorch.strategies import DDPStrategy
 from torch.utils.data import DataLoader
 
 from .. import utils
+from .throughput import ThroughputMonitor
 from ..config import Config
 from ..data import db_utils, ms_io
 from ..denovo.dataloaders import DeNovoDataModule
 from ..denovo.evaluate import aa_match_batch, aa_match_metrics
 from ..denovo.model import DbSpec2Pep, Spec2Pep
+
 
 logger = logging.getLogger("casanovo")
 
