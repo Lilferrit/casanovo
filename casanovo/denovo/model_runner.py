@@ -6,6 +6,7 @@ import logging
 import os
 import tempfile
 import uuid
+import time
 import warnings
 from pathlib import Path
 from typing import Iterable, List, Optional, Union
@@ -73,6 +74,11 @@ class ModelRunner:
         self.model = None
         self.loaders = None
         self.writer = None
+
+        # Timing information
+        self.start_time = None
+        self.compute_start_time = None
+        self.end_time = None
 
         if output_dir is None:
             self.callbacks = []
@@ -172,6 +178,15 @@ class ModelRunner:
         self.loaders.setup(stage="test", annotated=False)
         self.trainer.predict(self.model, self.loaders.db_dataloader())
 
+    def log_time(self) -> None:
+        logger.info(
+            "Setup Time: %.2fs", self.compute_start_time - self.start_time
+        )
+        logger.info(
+            "Compute Time: %.2fs", self.end_time - self.compute_start_time
+        )
+        logger.info("Total Run Time: %.2fs", self.end_time - self.start_time)
+
     def train(
         self,
         train_peak_path: Iterable[str],
@@ -186,6 +201,7 @@ class ModelRunner:
         valid_peak_path : iterable of str
             The path to the MS data files for validation.
         """
+        self.start_time = time.perf_counter()
         self.initialize_trainer(train=True)
         self.initialize_model(train=True)
 
@@ -194,11 +210,16 @@ class ModelRunner:
         self.initialize_data_module(train_index, valid_index)
         self.loaders.setup()
 
+        train_loaders = self.loaders.train_dataloader()
+        val_loaders = (self.loaders.val_dataloader(),)
+        self.compute_start_time = time.perf_counter()
         self.trainer.fit(
             self.model,
-            self.loaders.train_dataloader(),
-            self.loaders.val_dataloader(),
+            train_loaders,
+            val_loaders,
         )
+        self.end_time = time.perf_counter()
+        self.log_time()
 
     def log_metrics(self, test_index: AnnotatedSpectrumIndex) -> None:
         """Log peptide precision and amino acid precision.
@@ -270,6 +291,7 @@ class ModelRunner:
             running model evaluation. Files that are not an annotated
             peak file format will be ignored if evaluate is set to true.
         """
+        self.start_time = time.perf_counter()
         self.writer = ms_io.MztabWriter(results_path)
         self.writer.set_metadata(
             self.config,
@@ -285,7 +307,11 @@ class ModelRunner:
         self.writer.set_ms_run(test_index.ms_files)
         self.initialize_data_module(test_index=test_index)
         self.loaders.setup(stage="test", annotated=False)
-        self.trainer.predict(self.model, self.loaders.test_dataloader())
+        test_loader = self.loaders.test_dataloader()
+        self.compute_start_time = time.perf_counter()
+        self.trainer.predict(self.model, test_loader)
+        self.end_time = time.perf_counter()
+        self.log_time()
 
         if evaluate:
             self.log_metrics(test_index)
