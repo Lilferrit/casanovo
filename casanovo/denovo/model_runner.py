@@ -5,6 +5,7 @@ import glob
 import logging
 import os
 import tempfile
+import time
 import warnings
 from pathlib import Path
 from typing import Iterable, List, Optional, Sequence, Union
@@ -73,6 +74,11 @@ class ModelRunner:
         self.model = None
         self.loaders = None
         self.writer = None
+
+        # Timing information
+        self.start_time = None
+        self.compute_start_time = None
+        self.end_time = None
 
         if output_dir is None:
             self.callbacks = []
@@ -171,6 +177,15 @@ class ModelRunner:
         self.loaders.setup(stage="test", annotated=False)
         self.trainer.predict(self.model, self.loaders.db_dataloader())
 
+    def log_time(self) -> None:
+        logger.info(
+            "Setup Time: %.2fs", self.compute_start_time - self.start_time
+        )
+        logger.info(
+            "Compute Time: %.2fs", self.end_time - self.compute_start_time
+        )
+        logger.info("Total Run Time: %.2fs", self.end_time - self.start_time)
+
     def train(
         self,
         train_peak_path: Iterable[str],
@@ -186,6 +201,7 @@ class ModelRunner:
         valid_peak_path : iterable of str
             The path to the MS data files for validation.
         """
+        self.start_time = time.perf_counter()
         self.initialize_trainer(train=True)
         self.initialize_tokenizer()
         self.initialize_model(train=True)
@@ -195,11 +211,16 @@ class ModelRunner:
         self.initialize_data_module(train_paths, valid_paths)
         self.loaders.setup()
 
+        train_loader = self.loaders.train_dataloader()
+        val_loader = self.loaders.val_dataloader()
+        self.compute_start_time = time.perf_counter()
         self.trainer.fit(
             self.model,
-            self.loaders.train_dataloader(),
-            self.loaders.val_dataloader(),
+            train_loader,
+            val_loader,
         )
+        self.end_time = time.perf_counter()
+        self.log_time()
 
     def log_metrics(self, test_dataloader: DataLoader) -> None:
         """
@@ -277,6 +298,7 @@ class ModelRunner:
             running model evaluation. Files that are not an annotated
             peak file format will be ignored if evaluate is set to true.
         """
+        self.start_time = time.perf_counter()
         self.writer = ms_io.MztabWriter(results_path)
         self.writer.set_metadata(
             self.config,
@@ -309,7 +331,10 @@ class ModelRunner:
             raise
 
         predict_dataloader = self.loaders.predict_dataloader()
+        self.compute_start_time = time.perf_counter()
         self.trainer.predict(self.model, predict_dataloader)
+        self.end_time = time.perf_counter()
+        self.log_time()
 
         if evaluate:
             self.log_metrics(predict_dataloader)
