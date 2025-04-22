@@ -290,6 +290,8 @@ def _get_config_file(file_path, file_name, additional_cfg=None):
         "val_check_interval": 1,
         "min_peaks": 10,
         "max_peaks": 150,
+        "val_patience_interval": -1,
+        "n_peaks": 150,
         "min_mz": 50.0,
         "max_mz": 2500.0,
         "min_intensity": 0.01,

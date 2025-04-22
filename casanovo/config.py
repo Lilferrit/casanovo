@@ -73,6 +73,8 @@ class Config:
         val_check_interval=int,
         min_peaks=int,
         max_peaks=int,
+        val_patience_interval=int,
+        n_peaks=int,
         min_mz=float,
         max_mz=float,
         min_intensity=float,
