@@ -1230,7 +1230,7 @@ def _aa_pep_score(
     peptide_score : float
         The peptide score.
     """
-    peptide_score = np.exp(np.mean(np.log(aa_scores)))
+    peptide_score = np.prod(aa_scores)
     if not fits_precursor_mz:
         peptide_score -= 1
     return aa_scores, peptide_score
