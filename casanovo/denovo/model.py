@@ -1231,7 +1231,6 @@ def _aa_pep_score(
         The peptide score.
     """
     peptide_score = np.exp(np.mean(np.log(aa_scores)))
-    aa_scores = (aa_scores + peptide_score) / 2
     if not fits_precursor_mz:
         peptide_score -= 1
     return aa_scores, peptide_score
