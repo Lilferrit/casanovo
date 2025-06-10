@@ -163,6 +163,7 @@ class ModelRunner:
             self.config.allowed_fixed_mods,
             self.config.allowed_var_mods,
             self.model.tokenizer,
+            db_path=Path(results_path).parent / "db_peptides.txt",
         )
         test_paths = self._get_input_paths(peak_path, False, "test")
         self.writer.set_ms_run(test_paths)

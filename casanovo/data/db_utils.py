@@ -71,6 +71,7 @@ class ProteinDatabase:
         allowed_fixed_mods: str,
         allowed_var_mods: str,
         tokenizer: depthcharge.tokenizers.PeptideTokenizer,
+        db_path=None,
     ):
         self.fixed_mods, self.var_mods, self.swap_map = _construct_mods_dict(
             allowed_fixed_mods, allowed_var_mods
@@ -102,6 +103,9 @@ class ProteinDatabase:
         self.db_peptides = self._digest_fasta(peptide_generator)
         self.precursor_tolerance = precursor_tolerance
         self.isotope_error = isotope_error
+
+        if db_path is not None:
+            self.db_peptides.to_csv(db_path, sep="\t")
 
     def _digest_fasta(
         self,
