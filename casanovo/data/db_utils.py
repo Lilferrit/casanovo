@@ -80,32 +80,36 @@ class ProteinDatabase:
         self.swap_regex = re.compile(
             "(%s)" % "|".join(map(re.escape, self.swap_map.keys()))
         )
-        aas = {r[0] for r in tokenizer.residues.keys() if r[0].isalpha()}
-        if tokenizer.replace_isoleucine_with_leucine:
-            aas.add("I")
-        peptide_generator = _peptide_generator(
-            fasta_path,
-            enzyme,
-            digestion,
-            missed_cleavages,
-            min_peptide_len,
-            max_peptide_len,
-            aas,
-        )
-        logger.info(
-            "Digesting FASTA file (enzyme = %s, digestion = %s, missed "
-            "cleavages = %d)...",
-            enzyme,
-            digestion,
-            missed_cleavages,
-        )
         self.tokenizer = tokenizer
-        self.db_peptides = self._digest_fasta(peptide_generator)
-        self.precursor_tolerance = precursor_tolerance
-        self.isotope_error = isotope_error
 
         if db_path is not None:
-            self.db_peptides.to_csv(db_path, sep="\t")
+            logger.info("Loading database file: %s", db_path)
+            self.db_peptides = pd.read_csv(db_path, sep="\t")
+        else:
+            aas = {r[0] for r in tokenizer.residues.keys() if r[0].isalpha()}
+            if tokenizer.replace_isoleucine_with_leucine:
+                aas.add("I")
+
+            peptide_generator = _peptide_generator(
+                fasta_path,
+                enzyme,
+                digestion,
+                missed_cleavages,
+                min_peptide_len,
+                max_peptide_len,
+                aas,
+            )
+            logger.info(
+                "Digesting FASTA file (enzyme = %s, digestion = %s, missed "
+                "cleavages = %d)...",
+                enzyme,
+                digestion,
+                missed_cleavages,
+            )
+            self.db_peptides = self._digest_fasta(peptide_generator)
+
+        self.precursor_tolerance = precursor_tolerance
+        self.isotope_error = isotope_error
 
     def _digest_fasta(
         self,

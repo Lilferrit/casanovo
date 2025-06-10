@@ -217,9 +217,15 @@ def sequence(
     nargs=1,
     type=click.Path(exists=True, dir_okay=False),
 )
+@click.option(
+    "--db_path",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False),
+)
 def db_search(
     peak_path: Tuple[str],
     fasta_path: str,
+    db_path: Optional[str],
     model: Optional[str],
     config: Optional[str],
     output_dir: Optional[str],
@@ -259,7 +265,9 @@ def db_search(
         logger.info("  %s", fasta_path)
 
         results_path = output_path / f"{output_root_name}.mztab"
-        runner.db_search(peak_path, fasta_path, str(results_path))
+        runner.db_search(
+            peak_path, fasta_path, str(results_path), db_path=db_path
+        )
         utils.log_annotate_report(
             runner.writer.psms, start_time=start_time, end_time=time.time()
         )
