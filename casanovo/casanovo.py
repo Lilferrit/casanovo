@@ -211,20 +211,19 @@ def sequence(
     nargs=-1,
     type=click.Path(exists=True, dir_okay=True),
 )
-@click.argument(
-    "fasta_path",
-    required=True,
-    nargs=1,
+@click.option(
+    "--fasta_path",
+    required=False,
     type=click.Path(exists=True, dir_okay=False),
 )
 @click.option(
     "--db_path",
-    default=None,
+    required=False,
     type=click.Path(exists=True, dir_okay=False),
 )
 def db_search(
     peak_path: Tuple[str],
-    fasta_path: str,
+    fasta_path: Optional[str],
     db_path: Optional[str],
     model: Optional[str],
     config: Optional[str],
@@ -238,6 +237,11 @@ def db_search(
     PEAK_PATH must be one or more mzML, mzXML, or MGF files.
     FASTA_PATH must be one FASTA file.
     """
+    if not fasta_path and not db_path:
+        raise click.UsageError(
+            "You must provide at least one of --fasta_path or --db_path."
+        )
+
     output_path, output_root_name = _setup_output(
         output_dir, output_root, force_overwrite, verbosity
     )

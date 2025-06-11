@@ -1,5 +1,6 @@
 """Unique methods used within db-search mode"""
 
+import ast
 import functools
 import logging
 import os
@@ -85,6 +86,9 @@ class ProteinDatabase:
         if db_path is not None:
             logger.info("Loading database file: %s", db_path)
             self.db_peptides = pd.read_csv(db_path, sep="\t")
+            self.db_peptides["protein"] = self.db_peptides["protein"].apply(
+                lambda x: x.split(",")
+            )
         else:
             aas = {r[0] for r in tokenizer.residues.keys() if r[0].isalpha()}
             if tokenizer.replace_isoleucine_with_leucine:

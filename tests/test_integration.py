@@ -169,6 +169,7 @@ def test_train_and_run(
         "--output_root",
         output_rootname,
         str(mgf_medium),
+        "--fasta_path",
         str(tiny_fasta_file),
     ]
 
