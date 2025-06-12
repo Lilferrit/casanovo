@@ -1273,6 +1273,7 @@ class DbSpec2Pep(Spec2Pep):
             for candidate in self.protein_database.get_candidates(
                 precursor_mz, precursor_charge
             ):
+                logger.info("Adding candidate: %s", candidate)
                 candidates.append((i, candidate))
 
             # Yield a batch if sufficient candidates are found or all
