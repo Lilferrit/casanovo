@@ -1303,8 +1303,11 @@ class DbSpec2Pep(Spec2Pep):
                         psm_batch["seq"]
                     )
                 except Exception as e:
-                    print(psm_batch["seq"])
-                    raise Exception() from e
+                    logger.error(
+                        "Tokenization failed for: %s", psm_batch["seq"]
+                    )
+                    print(f"Tokenization failed for: {psm_batch['seq']}")
+                    raise
 
                 psm_batch["seq"] = psm_batch["seq"].to(self.decoder.device)
 
