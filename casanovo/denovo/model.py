@@ -1273,7 +1273,6 @@ class DbSpec2Pep(Spec2Pep):
             for candidate in self.protein_database.get_candidates(
                 precursor_mz, precursor_charge
             ):
-                logger.info("Adding candidate: %s", candidate)
                 candidates.append((i, candidate))
 
             # Yield a batch if sufficient candidates are found or all
@@ -1298,17 +1297,7 @@ class DbSpec2Pep(Spec2Pep):
                 # We need to keep the original sequence for the database
                 # lookup in case of there is an isoleucine -> leucine swap
                 psm_batch["original_seq_str"] = psm_batch["seq"]
-
-                try:
-                    psm_batch["seq"] = self.tokenizer.tokenize(
-                        psm_batch["seq"]
-                    )
-                except Exception as e:
-                    logger.error(
-                        "Tokenization failed for: %s", psm_batch["seq"]
-                    )
-                    print(f"Tokenization failed for: {psm_batch['seq']}")
-                    raise
+                psm_batch["seq"] = self.tokenizer.tokenize(psm_batch["seq"])
 
                 psm_batch["seq"] = psm_batch["seq"].to(self.decoder.device)
 

@@ -95,6 +95,7 @@ class ProteinDatabase:
             self.db_peptides["protein"] = self.db_peptides["protein"].apply(
                 lambda x: x.split(",")
             )
+            self.db_peptides.set_index("peptide", inplace=True)
         else:
             aas = {r[0] for r in tokenizer.residues.keys() if r[0].isalpha()}
             if tokenizer.replace_isoleucine_with_leucine:
