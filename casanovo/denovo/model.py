@@ -1297,7 +1297,15 @@ class DbSpec2Pep(Spec2Pep):
                 # We need to keep the original sequence for the database
                 # lookup in case of there is an isoleucine -> leucine swap
                 psm_batch["original_seq_str"] = psm_batch["seq"]
-                psm_batch["seq"] = self.tokenizer.tokenize(psm_batch["seq"])
+
+                try:
+                    psm_batch["seq"] = self.tokenizer.tokenize(
+                        psm_batch["seq"]
+                    )
+                except Exception as e:
+                    print(psm_batch["seq"])
+                    raise Exception() from e
+
                 psm_batch["seq"] = psm_batch["seq"].to(self.decoder.device)
 
                 # Yield the PSM batch for processing.
