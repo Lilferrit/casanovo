@@ -86,6 +86,12 @@ class ProteinDatabase:
         if db_path is not None:
             logger.info("Loading database file: %s", db_path)
             self.db_peptides = pd.read_csv(db_path, sep="\t")
+            self.db_peptides["peptide"] = self.db_peptides["peptide"].astype(
+                str
+            )
+            self.db_peptides["calc_mass"] = self.db_peptides[
+                "calc_mass"
+            ].astype(float)
             self.db_peptides["protein"] = self.db_peptides["protein"].apply(
                 lambda x: x.split(",")
             )
