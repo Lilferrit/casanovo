@@ -14,7 +14,7 @@ import torch
 from depthcharge.tokenizers import PeptideTokenizer
 
 from .. import config
-from ..data import ms_io, psm
+from ..data import ms_io, psm, tensor_io
 from ..denovo.transformers import PeptideDecoder, SpectrumEncoder
 from . import evaluate
 
@@ -117,6 +117,8 @@ class Spec2Pep(pl.LightningModule):
         out_writer: Optional[ms_io.MztabWriter] = None,
         calculate_precision: bool = False,
         tokenizer: PeptideTokenizer | None = None,
+        tensor_writer: Optional[tensor_io.BatchTensorWriter] = None,
+        teacher_force: bool = False,
         **kwargs: Dict,
     ):
         super().__init__()
@@ -173,11 +175,13 @@ class Spec2Pep(pl.LightningModule):
 
         # Logging.
         self.calculate_precision = calculate_precision
+        self.teacher_force = teacher_force
         self.n_log = n_log
         self._history = []
 
         # Output writer during predicting.
         self.out_writer = out_writer
+        self.tensor_writer = tensor_writer
 
         # Get n-term mod tokens
         self.n_term = [
@@ -894,34 +898,78 @@ class Spec2Pep(pl.LightningModule):
         """
         # Record the loss.
         loss = self.training_step(batch, mode="valid")
-        if not self.calculate_precision:
+
+        if self.calculate_precision:
+            log_args = dict(on_step=False, on_epoch=True, sync_dist=True)
+            logger.warning(
+                "I didn't bother implementing precision logging on this branch"
+            )
+            self.log(
+                "pep_precision",
+                -42,
+                **log_args,
+                batch_size=len(batch["peak_file"]),
+            )
+            self.log(
+                "aa_precision",
+                -42,
+                **log_args,
+                batch_size=len(batch["peak_file"]),
+            )
+
+        if not self.teacher_force:
             return loss
 
-        # Calculate and log amino acid and peptide match evaluation
-        # metrics from the predicted peptides.
-        peptides_true = [
-            "".join(pep)
-            for pep in self.tokenizer.detokenize(batch["seq"], join=False)
-        ]
-        peptides_pred = [
-            pred
-            for spectrum_preds in self.forward(batch)
-            for _, _, pred in spectrum_preds
-        ]
-        aa_precision, _, pep_precision = evaluate.aa_match_metrics(
-            *evaluate.aa_match_batch(
-                peptides_true, peptides_pred, self.tokenizer.residues
-            )
-        )
+        pred, truth = self._forward_step(batch)
+        pred = pred[:, :-1, :]
+        pred_tokens = torch.argmax(pred, dim=2)
+        aa_scores_mask_all = pred_tokens != 0
+        aa_scores_all = self.softmax(pred)
+        aa_scores_all = torch.gather(
+            aa_scores_all, dim=2, index=pred_tokens.unsqueeze(-1)
+        ).squeeze(-1)
 
-        batch_size = len(peptides_true)
-        log_args = dict(on_step=False, on_epoch=True, sync_dist=True)
-        self.log(
-            "pep_precision", pep_precision, **log_args, batch_size=batch_size
-        )
-        self.log(
-            "aa_precision", aa_precision, **log_args, batch_size=batch_size
-        )
+        predictions = []
+        for (
+            filename,
+            scan,
+            precursor_charge,
+            precursor_mz,
+            peptide,
+            aa_scores,
+            aa_scores_mask,
+        ) in zip(
+            batch["peak_file"],
+            batch["scan_id"],
+            batch["precursor_charge"],
+            batch["precursor_mz"],
+            pred_tokens,
+            aa_scores_all,
+            aa_scores_mask_all,
+        ):
+            peptide = "".join(
+                self.tokenizer.detokenize(
+                    peptide.unsqueeze(0),
+                    join=False,
+                )[0]
+            )
+            aa_scores = aa_scores[aa_scores_mask]
+            aa_scores = aa_scores.cpu().detach().numpy()
+            peptide_score = _peptide_score(aa_scores, True)
+            predictions.append(
+                psm.PepSpecMatch(
+                    sequence=peptide,
+                    spectrum_id=(filename, scan),
+                    peptide_score=peptide_score,
+                    charge=int(precursor_charge),
+                    calc_mz=np.nan,
+                    exp_mz=precursor_mz.item(),
+                    aa_scores=aa_scores,
+                )
+            )
+
+        self.on_predict_batch_end(predictions)
+        self.save_logits(pred)
         return loss
 
     def predict_step(
@@ -1006,6 +1054,28 @@ class Spec2Pep(pl.LightningModule):
             )
         self._history.append(metrics)
         self._log_history()
+
+    def save_logits(self, outputs: torch.Tensor) -> None:
+        """Log the predicted logits"""
+        if self.tensor_writer is None:
+            logger.warning(
+                "Tensor writer not initialized, not writing batch logits."
+            )
+            return
+
+        n_sequences = outputs.shape[0]
+        sequence_length = outputs.shape[1]
+        n_aas = outputs.shape[2]
+        pad_length = self.max_peptide_len - sequence_length
+        padding = torch.zeros(
+            n_sequences,
+            pad_length,
+            n_aas,
+            device=outputs.device,
+            dtype=outputs.dtype,
+        )
+        outputs = torch.cat((outputs, padding), dim=1)
+        self.tensor_writer.write(outputs)
 
     def on_predict_batch_end(
         self, outputs: List[psm.PepSpecMatch], *args

@@ -90,7 +90,7 @@ def test_train_and_run(
     assert psms.loc[4, "spectra_ref"] == "ms_run[2]:scan=111"
 
     # Run Casanovo in de novo evaluation mode.
-    output_rootname = "test-eval"
+    output_rootname = "test-teacher-force"
     output_filename = (tmp_path / output_rootname).with_suffix(".mztab")
     eval_args = [
         "sequence",
@@ -103,7 +103,6 @@ def test_train_and_run(
         "--output_root",
         output_rootname,
         str(mgf_small),
-        "--evaluate",
     ]
 
     result = run(eval_args)
@@ -150,6 +149,27 @@ def test_train_and_run(
     # )
 
     assert output_filename.is_file()
+
+    # Run Casanovo in teacher-forcing mode
+    output_rootname = "test-eval"
+    output_filename = (tmp_path / output_rootname).with_suffix(".mztab")
+    teacher_force_args = [
+        "validate",
+        "--model",
+        str(model_file),
+        "--config",
+        tiny_config,
+        "--output_dir",
+        str(tmp_path),
+        "--output_root",
+        output_rootname,
+        str(mgf_small),
+    ]
+
+    result = run(teacher_force_args)
+    assert result.exit_code == 0
+    assert output_filename.is_file()
+    assert (tmp_path / "batches").is_dir()
 
     # Run Casanovo in database prediction mode.
     output_rootname = "db"

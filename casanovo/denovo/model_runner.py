@@ -26,7 +26,7 @@ from torch.utils.data import DataLoader
 
 from .. import utils
 from ..config import Config
-from ..data import db_utils, ms_io, psm
+from ..data import db_utils, ms_io, psm, tensor_io
 from ..denovo.dataloaders import DeNovoDataModule
 from ..denovo.evaluate import aa_match_batch, aa_match_metrics
 from ..denovo.model import DbSpec2Pep, Spec2Pep
@@ -368,6 +368,45 @@ class ModelRunner:
 
         if evaluate:
             self.log_metrics(predict_dataloader)
+
+    def validate(
+        self,
+        peak_path: Iterable[str],
+        results_path: str,
+    ) -> None:
+        """
+        Predict peptide sequences via teacher forcing with a trained Casanovo
+        model
+
+        Parameters
+        ----------
+        peak_path : Iterable[str]
+            The path with the MS data files for predicting peptide
+            sequences.
+        results_path : str
+            Sequencing results file path.
+        """
+        self.writer = ms_io.MztabWriter(results_path)
+        self.writer.set_metadata(
+            self.config,
+            model=str(self.model_filename),
+            config_filename=self.config.file,
+        )
+
+        self.initialize_trainer(train=False)
+        self.initialize_tokenizer()
+        self.initialize_model(train=False)
+        self.model.out_writer = self.writer
+        self.model.tensor_writer = tensor_io.BatchTensorWriter(self.output_dir)
+        self.model.teacher_force = True
+
+        test_paths = self._get_input_paths(peak_path, False, "test")
+        self.writer.set_ms_run(test_paths)
+        self.initialize_data_module(test_paths=test_paths)
+        self.loaders.setup(stage="test", annotated=True)
+        predict_dataloader = self.loaders.predict_dataloader()
+        self.trainer.validate(self.model, predict_dataloader)
+        self.log_metrics(predict_dataloader)
 
     def initialize_trainer(self, train: bool) -> None:
         """

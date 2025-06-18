@@ -211,6 +211,58 @@ def sequence(
     nargs=-1,
     type=click.Path(exists=True, dir_okay=True),
 )
+def validate(
+    peak_path: Tuple[str],
+    model: Optional[str],
+    config: Optional[str],
+    output_dir: Optional[str],
+    output_root: Optional[str],
+    verbosity: str,
+    force_overwrite: bool,
+) -> None:
+    """De novo sequence peptides from tandem mass spectra.
+
+    PEAK_PATH must be one or more mzML, mzXML, or MGF files from which
+    to sequence peptides. If evaluate is set to True PEAK_PATH must be
+    one or more annotated MGF file.
+    """
+    output_path, output_root_name = _setup_output(
+        output_dir, output_root, force_overwrite, verbosity
+    )
+
+    start_time = time.time()
+    utils.log_system_info()
+
+    utils.check_dir_file_exists(output_path, f"{output_root}.mztab")
+    config, model = setup_model(
+        model, config, output_path, output_root_name, False
+    )
+
+    with ModelRunner(
+        config,
+        model,
+        output_path,
+        output_root_name if output_root is not None else None,
+        False,
+    ) as runner:
+        logger.info("Sequencing via teacher forcing %speptides from:")
+        for peak_file in peak_path:
+            logger.info("  %s", peak_file)
+
+        results_path = output_path / f"{output_root_name}.mztab"
+        runner.validate(peak_path, str(results_path))
+        utils.log_annotate_report(
+            runner.writer.psms, start_time=start_time, end_time=time.time()
+        )
+
+
+@main.command(cls=_SharedParams)
+@click.argument(
+    "peak_path",
+    required=True,
+    nargs=-1,
+    type=click.Path(exists=True, dir_okay=True),
+)
 @click.argument(
     "fasta_path",
     required=True,
