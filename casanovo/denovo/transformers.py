@@ -136,7 +136,7 @@ class LinearEmbeder(torch.nn.Module):
         return self.encoder(X.unsqueeze(-1))
 
 
-class LinearIntensityPeakEncoder(PeakEncoder):
+class AddSinusoidsPeakEncoder(PeakEncoder):
     def __init__(
         self,
         d_model,
@@ -155,7 +155,6 @@ class LinearIntensityPeakEncoder(PeakEncoder):
             learnable_wavelengths,
         )
 
-        self.int_encoder = LinearEmbeder(d_model)
         self.combiner = None
 
     def forward(self, X: torch.Tensor) -> torch.Tensor:
@@ -221,7 +220,7 @@ class SpectrumEncoder(SpectrumTransformerEncoder):
     ):
         """Initialize a SpectrumEncoder."""
         if peak_encoder and use_linear_embeddings:
-            peak_encoder = LinearIntensityPeakEncoder(d_model)
+            peak_encoder = AddSinusoidsPeakEncoder(d_model)
 
         super().__init__(
             d_model, n_head, dim_feedforward, n_layers, dropout, peak_encoder
